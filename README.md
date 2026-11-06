@@ -67,6 +67,12 @@ Keys travel in Mouser's query string, so the client never logs URLs, strips them
 transport errors, scrubs the key from any reply that echoes it, and redacts `ApiKey` in
 `Debug`.
 
+## Demo
+
+[`demo/`](demo/) has scripted terminal recordings ([VHS](https://github.com/charmbracelet/vhs))
+of pricing a BOM and of an order confirmed in the form, against a stand-in Mouser API with
+demo data, so anyone can try the server without a Mouser account.
+
 ## Install
 
 **With cargo:**
