@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 mouser = { workspace = true, features = ["schemars"] }
-rmcp = { version = "3.9", features = ["server", "transport-io"] }
+rmcp = { version = "3.9", features = ["server", "transport-io", "elicitation"] }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -25,6 +25,8 @@ rusty-money = { version = "0.5.1", features = ["iso"] }
 rust_decimal = "1.43.0"
 
 [dev-dependencies]
+# the client side of MCP, to drive the server over an in-memory transport in tests
+rmcp = { version = "3.9", features = ["client"] }
 wiremock = { workspace = true }
 
 [lints]

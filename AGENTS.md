@@ -22,6 +22,7 @@ crates/mouser/          library — no MCP types cross into here
   tests/api.rs          the client against a mock Mouser API (wiremock)
 crates/mouser-mcp/      binary
   src/server.rs         MCP adapter — #[tool] stubs only; one router per key
+  src/confirm.rs        the user's order confirmation (elicitation form, summary, pending store)
   src/tools.rs          pure logic, returns anyhow::Result<Value>
   src/params.rs         Deserialize + JsonSchema argument structs
   src/error.rs          maps failures onto MCP error codes
@@ -55,6 +56,10 @@ Ordering spends real money. These are not negotiable:
   what the caller confirmed, and the total is within `Config::max_order_total`. No ceiling
   configured means no order. These checks live in the library, not the tool layer; do not add
   a parameter that relaxes them.
+- After those checks and before submitting, the user confirms the order in an MCP
+  elicitation form (`crates/mouser-mcp/src/confirm.rs`). Only an accepted form with
+  `place_order: true` goes ahead; a client without form elicitation cannot order. Never add a
+  path that submits without that answer.
 - Cart changes and orders are separate gates (`MOUSER_ALLOW_CART_WRITES`,
   `MOUSER_ALLOW_ORDERS`); neither implies the other.
 - Never log a URL or a request: the key is in the query string. Transport errors are stripped
