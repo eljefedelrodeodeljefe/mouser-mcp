@@ -12,7 +12,7 @@ with `--hold START:SECONDS` (an answer to read, the form), and writes two GIFs, 
 Every take times differently: read the times off the MP4 (or `--list`) and pass them.
 
     demo/trim.py --list
-    demo/trim.py --split 94 --hold 20.4:7 --hold 79.7:8 --hold 110.3:5 --hold 136:4 --hold 164.6:8
+    demo/trim.py --split 120.8 --hold 25.4:7 --hold 82.5:10 --hold 139.5:5 --hold 170.3:4 --hold 206.4:9
 
 Needs ffmpeg and ffprobe. Standard library only.
 """
@@ -25,7 +25,7 @@ import subprocess
 import sys
 
 SRC = "demo/story.mp4"
-FILTER = "fps=8,scale=1120:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=48:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle"
+FILTER = "fps=6,split[a][b];[a]palettegen=max_colors=48:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle"
 
 
 def duration() -> float:

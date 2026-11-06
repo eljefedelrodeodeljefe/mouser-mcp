@@ -25,12 +25,13 @@ go install github.com/charmbracelet/vhs@latest   # or a release binary
 # ttyd: https://github.com/tsl0922/ttyd/releases
 vhs demo/story.tape                 # writes demo/story.mp4 (not committed)
 demo/trim.py --list                 # the still stretches, with their times
-demo/trim.py --split 94 --hold 20.4:7 --hold 79.7:8 --hold 110.3:5 --hold 136:4 --hold 164.6:8
+demo/trim.py --split 120.8 --hold 25.4:7 --hold 82.5:10 --hold 139.5:5 --hold 170.3:4 --hold 206.4:9
 ```
 
 Run from the repository root. The tape builds the server, starts the stand-in hidden before
-the first frame, and runs Claude Code in an empty folder, `~/.cache/mouser-mcp-demo/bench`, so
-the session shows a user's bench, not this repository. The first time, Claude Code asks
+the first frame, and runs `claude` in a bench folder, `~/.cache/mouser-mcp-demo/bench`, that
+holds only the session's configuration, so the session shows a user's bench and this
+repository stays out of it. The first time, Claude Code asks
 whether to trust that folder: run `claude` there once and accept.
 
 The model's answers vary from take to take. Check the frames before committing (a scene can
@@ -42,6 +43,10 @@ on screen. The form keys in the tape assume five order lines.
 
 ```sh
 cargo build --release -p mouser-mcp
-python3 demo/fake_mouser.py &
-claude --strict-mcp-config --mcp-config demo/mcp.json
+demo/setup.sh                       # starts the stand-in and prepares the bench folder
+cd ~/.cache/mouser-mcp-demo/bench && claude
 ```
+
+The bench folder holds the session's configuration, so `claude` needs no flags: `.mcp.json`
+(the server, pointed at the stand-in), `.claude/settings.local.json` (the server approved and
+its tools allowed) and `CLAUDE.md` (asks the agent to name each tool it calls).

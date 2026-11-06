@@ -20,8 +20,8 @@ Require claude
 Require python3
 
 Set Shell bash
-Set FontSize 16
-Set Width 1400
+Set FontSize 18
+Set Width 1200
 Set Height 1000
 Set Padding 24
 Set Theme "Catppuccin Mocha"
@@ -32,7 +32,7 @@ Hide
 # A recording started from inside Claude Code inherits its session markers: clear them.
 Type "unset $(compgen -v CLAUDE); demo/setup.sh && cd ~/.cache/mouser-mcp-demo/bench && clear" Enter
 Sleep 8s
-Type `claude --strict-mcp-config --mcp-config mcp.json --allowedTools "mcp__mouser__*" --append-system-prompt "Before each Mouser tool call, say in one short line which tool you call and why."`
+Type "claude"
 Enter
 Sleep 6s
 Show
@@ -47,7 +47,7 @@ Sleep 26s
 Type "Are there no alternative parts? This is for a 2 to 3 GHz bench and I need the parts this week."
 Sleep 600ms
 Enter
-Sleep 60s
+Sleep 85s
 
 # Scene 3: the cart
 Type "Put the in-stock set in a new cart: the ZX10R splitters, the Fairview pads and terminations, and the Cinch 1 m and 2 m cables. Skip the 1 ft jumpers, my bench cables reach."
@@ -59,7 +59,7 @@ Sleep 20s
 Type "Order it with UPS Express Saver and PayPal."
 Sleep 600ms
 Enter
-Sleep 38s
+Sleep 45s
 
 Sleep 3s
 Right

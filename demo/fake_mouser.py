@@ -26,19 +26,19 @@ PARTS = {
     "CBL-1M-SMSM+": ("139-CBL-1M-SMSM+", "Mini-Circuits", "RF Cable Assemblies Precision Test Cable, 18.0 GHz, 1 m", "0", "106,81 €", 106.81, 119, [(131, "2026-12-07")]),
     "CBL-2M-SMSM+": ("139-CBL-2M-SMSM+", "Mini-Circuits", "RF Cable Assemblies Precision Test Cable, 18.0 GHz, 2 m", "0", "136,99 €", 136.99, 119, [(290, "2027-03-22")]),
     "CBL-1FT-SMSM+": ("139-CBL-1FT-SMSM", "Mini-Circuits", "RF Cable Assemblies Precision Test Cable, 18.0 GHz, 1 ft", "21", "99,41 €", 99.41, 119, [(30, "2026-12-21")]),
-    "ANNE-50+": ("139-ANNE-50", "Mini-Circuits", "RF Terminators TERM / SMA-M / 18GHZ", "0", "16,56 €", 16.56, 119, [(1321, "2026-11-16")]),
+    "ANNE-50+": ("139-ANNE-50", "Mini-Circuits", "RF Terminators TERM / SMA-M / 50 Ohm / 18GHZ", "0", "16,56 €", 16.56, 119, [(1321, "2026-11-16")]),
     # in-stock alternatives
     "ZX10R-2-183-S+": ("139-ZX10R-2-183-S+", "Mini-Circuits", "Signal Conditioning 2 Ways Resistive Power Splitter, DC - 18000 MHz, 50 Ohm", "2", "161,10 €", 161.10, 217, [(90, "2027-06-14")]),
     "FMAT7467-6": ("67-FMAT7467-6", "Fairview Microwave", "Attenuators - Interconnects 6 dB Fixed Attenuator SMA Male to SMA Female DC to 12 GHz, 2 W", "6", "53,10 €", 53.10, 194, []),
     "415-0033-M1.0": ("530-415-0033-M1.0", "Cinch Connectivity Solutions", "RF Cable Assemblies Straight SMA Plug to Straight SMA Plug, 1 m", "402", "17,44 €", 17.44, 124, []),
     "415-0033-M2.0": ("530-415-0033-M2.0", "Cinch Connectivity Solutions", "RF Cable Assemblies Straight SMA Plug to Straight SMA Plug, 2 m", "372", "22,68 €", 22.68, 118, []),
-    "ST0645": ("67-ST0645", "Fairview Microwave", "RF Terminators SMA Male Termination 1 W to 6 GHz, VSWR 1.15", "104", "12,63 €", 12.63, 49, []),
+    "ST0645": ("67-ST0645", "Fairview Microwave", "RF Terminators SMA Male Termination (Load) 50 Ohm, 1 W to 6 GHz, VSWR 1.15", "104", "12,63 €", 12.63, 49, []),
     # what a search also finds: out of band, out of stock, or costlier
     "LRPS-2-11+": ("139-LRPS-2-11+", "Mini-Circuits", "Signal Conditioning 2 Ways Core & Wire Power Splitter, 20 - 2000 MHz, 50 Ohm", "95", "34,95 €", 34.95, 119, []),
     "PE2082": ("28-PE2082", "Pasternack", "Signal Conditioning 2 Way SMA Power Divider from DC to 6 GHz Rated at 2 Watts", "10", "412,09 €", 412.09, 16, [(7, "2026-11-24")]),
     "ZX10-2-42-S+": ("139-ZX10-2-42-S+", "Mini-Circuits", "Signal Conditioning 2 Ways DC Pass Power Splitter, 1900 - 4200 MHz, 50 Ohm", "0", "66,57 €", 66.57, 217, [(7, "2026-11-30"), (40, "2026-12-28")]),
     "ATS-1M1F-06DB2W": ("523-ATS-1M1F-06DB2W", "Amphenol RF", "Attenuators - Interconnects SMA Jack to SMA Plug Attenuator, 6 dB, 2W", "70", "55,83 €", 55.83, 98, []),
-    "PE6TR1014": ("28-PE6TR1014", "Pasternack", "RF Terminators 1 Watt RF Load Up to 6 GHz with SMA Male", "24", "25,27 €", 25.27, 105, []),
+    "PE6TR1014": ("28-PE6TR1014", "Pasternack", "RF Terminators 1 Watt 50 Ohm RF Load Up to 6 GHz with SMA Male", "24", "25,27 €", 25.27, 105, []),
     "SF104/11SMA/11SMA/1000mm": ("455-04SMAMSMAM1000MM", "HUBER+SUHNER", "RF Test Cables MICROWAVE TEST ASSEMBLIES, SMA (male), SMA (male), 50 Ohm, 18 GHz, 1000mm", "212", "179,96 €", 179.96, 70, []),
 }
 # Words a keyword search treats as the same thing (the demo's prompts use the everyday ones).
@@ -74,14 +74,27 @@ def part(mpn: str) -> dict:
     }
 
 
-def keyword_match(mpn: str, keyword: str) -> bool:
-    """Every word of the keyword (or one of its synonyms) is in the part number or description."""
-    text = f"{mpn} {PARTS[mpn][2]}".lower()
+def _norm(text: str) -> str:
+    """Lower case, hyphens and commas as spaces: "2-Way" and "2 Ways" meet as "2 way"."""
+    return " ".join(w[:-1] if len(w) > 3 and w.endswith("s") else w
+                    for w in text.lower().replace("-", " ").replace(",", " ").split())
+
+
+def keyword_score(mpn: str, keyword: str) -> float:
+    """The share of the keyword's words (or one of their synonyms) found in the part's number,
+    maker or description. Mouser's own search is looser than an exact phrase match."""
+    text = _norm(f"{mpn} {PARTS[mpn][1]} {PARTS[mpn][2]}")
     squeezed = text.replace(" ", "")  # "6dB" and "6 dB", "1m" and "1 m"
-    words = [w for w in keyword.lower().replace(",", " ").split() if w]
-    return bool(words) and all(
-        any(s in text or s in squeezed for s in SYNONYMS.get(w, (w,))) for w in words
-    )
+    words = _norm(keyword).split()
+    if not words:
+        return 0.0
+    hit = sum(any(_norm(s) in text or _norm(s).replace(" ", "") in squeezed
+                  for s in SYNONYMS.get(w, (w,))) for w in words)
+    return hit / len(words)
+
+
+def keyword_match(mpn: str, keyword: str) -> bool:
+    return keyword_score(mpn, keyword) >= 0.6
 
 
 def lookup(number: str) -> str | None:
@@ -154,17 +167,40 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply({"Errors": [{"Code": "Invalid", "Message": "Invalid unique identifier."}]})
         p = u.path.removeprefix("/api").lower()
         b = self.body() if method == "POST" else {}
+        for r in b.values() if isinstance(b, dict) else []:
+            if isinstance(r, dict) and ("keyword" in r or "mouserPartNumber" in r):
+                terms = r.get("keyword") or r.get("mouserPartNumber")
+                opts = r.get("searchOptions") or r.get("partSearchOptions") or ""
+                sys.stderr.write(f"fake-mouser:   {terms!r} {r.get('manufacturerName') or ''} {opts}\n")
         if p == "/v1/search/partnumber":
             req = b.get("SearchByPartRequest", {})
-            found = [m for n in req.get("mouserPartNumber", "").split("|") if (m := lookup(n))]
+            exact = (req.get("partSearchOptions") or "").lower() == "exact"
+            found: list[str] = []
+            for n in (x.strip() for x in req.get("mouserPartNumber", "").split("|") if x.strip()):
+                if exact:
+                    hits = [m] if (m := lookup(n)) else []
+                else:  # like Mouser: any part whose number starts with or contains the text
+                    hits = [m for m in PARTS if n.lower() in m.lower() or n.lower() in PARTS[m][0].lower()]
+                found += [m for m in hits if m not in found]
             return self.reply({"Errors": [], "SearchResults": {"NumberOfResult": len(found), "Parts": [part(m) for m in found]}})
-        if p in ("/v1/search/keyword", "/v2/search/keyword"):
-            req = b.get("SearchByKeywordRequest", {})
+        if p in ("/v1/search/keywordandmanufacturer", "/v2/search/keywordandmanufacturer"):
+            req = b.get("SearchByKeywordMfrNameRequest", {})
+            maker = (req.get("manufacturerName") or "").lower()
             in_stock = (req.get("searchOptions") or "").lower() in ("instock", "rohsandinstock")
             found = [
                 m for m in PARTS
-                if keyword_match(m, req.get("keyword") or "") and (not in_stock or int(PARTS[m][3]) > 0)
+                if maker in PARTS[m][1].lower() and keyword_match(m, req.get("keyword") or "")
+                and (not in_stock or int(PARTS[m][3]) > 0)
             ]
+            return self.reply({"Errors": [], "SearchResults": {"NumberOfResult": len(found), "Parts": [part(m) for m in found[:50]]}})
+        if p in ("/v1/search/keyword", "/v2/search/keyword"):
+            req = b.get("SearchByKeywordRequest", {})
+            in_stock = (req.get("searchOptions") or "").lower() in ("instock", "rohsandinstock")
+            kw = req.get("keyword") or ""
+            found = sorted(
+                (m for m in PARTS if keyword_match(m, kw) and (not in_stock or int(PARTS[m][3]) > 0)),
+                key=lambda m: -keyword_score(m, kw),
+            )
             shown = found[int(req.get("startingRecord") or 0):][: int(req.get("records") or 10) or 10]
             return self.reply({"Errors": [], "SearchResults": {"NumberOfResult": len(found), "Parts": [part(m) for m in shown]}})
         if p == "/v1/cart" and method == "GET":
@@ -191,7 +227,7 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/v1/order":
             o = b.get("Order") or b
             return self.reply(order(b, bool(o.get("SubmitOrder"))))
-        return self.reply({"Errors": [{"Code": "NotFound", "Message": f"demo server: no {method} {p}"}]}, 404)
+        return self.reply({"Errors": [{"Code": "NotFound", "Message": "The requested resource does not exist."}]}, 404)
 
     def do_GET(self):
         self.route("GET")
