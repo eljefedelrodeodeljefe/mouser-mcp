@@ -5,7 +5,7 @@
 [![MCP](https://img.shields.io/badge/MCP-server-8A2BE2.svg)](https://modelcontextprotocol.io)
 
 **Let an AI agent price your BOM at Mouser: live stock, lead times and price breaks, carts,
-order history, and ordering that never happens by accident.**
+order history, and orders that you confirm yourself.**
 
 ![Ordering from Claude Code: the model prepares the cart and the preview, the person confirms the order in a form](demo/order.gif)
 
@@ -30,7 +30,7 @@ call by exact part number, picks the offer that covers the quantity from stock a
 extended price, prices it at the line's quantity from the price breaks, flags shortages,
 minimum and multiple violations and discontinued parts, and totals per currency. Amounts are
 exact decimals, read with each currency's own separators; a price or stock figure that does not
-parse is flagged on its line, never guessed.
+parse is flagged as unreadable on its line.
 
 Search results are compact by default (stock, lead time, Min/Mult, price breaks, lifecycle,
 URLs); `full: true` returns Mouser's whole record. The library keeps every field Mouser sends,
@@ -38,8 +38,8 @@ including ones its documents do not describe.
 
 ## Safety
 
-Searching and reading are free of side effects. Changing a cart and placing an order are not,
-so they are gated separately, and an order is never a side effect:
+Searching and reading change nothing. Changing a cart and placing an order each have their
+own gate, and every order needs the person's confirmation:
 
 1. **Cart changes** need `MOUSER_ALLOW_CART_WRITES=true`.
 2. **Orders** need `MOUSER_ALLOW_ORDERS=true` **and** a ceiling, `MOUSER_MAX_ORDER_TOTAL`
@@ -49,20 +49,20 @@ so they are gated separately, and an order is never a side effect:
    `submit_order` sends `true`, and only after a **fresh preview** matches what the caller
    confirmed: currency, total and every line. If the price moved since the preview, nothing is
    placed and the caller gets an *invalid params* error explaining what changed.
-4. **The user confirms in a form, not the model.** Before placing it, the server asks the
-   person at the MCP client through [elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation).
+4. **The person at the MCP client confirms every order in a form.** Before placing it, the
+   server asks the person at the MCP client through [elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation).
    The form has a one-line summary (total, shipping, tax, payment, ship-to), "Order lines",
    a list of every line (quantity, part, unit price, line total, your line reference) with all
    of them selected, and "Place this order", a checkbox, unticked. Clients step through the
    list with the keyboard, so a long order stays readable. Only an accepted form with every
    line still selected and the box ticked places the order, and only if Mouser's final preview
-   still has exactly the lines confirmed; deselecting a line, declining, cancelling or not
+   still has the lines confirmed; deselecting a line, declining, cancelling or not
    answering places nothing. A client that cannot show forms cannot order. On protocol
    `2026-07-28` the form travels as an `InputRequiredResult` (multi round-trip); the pending
    confirmation stays on the server, is single use, expires after ten minutes and is bound to
    the exact arguments of the call, so an answer cannot be replayed onto another order.
 
-An order takes four short calls: `query_order_options` (shipping and payment codes),
+An order takes four steps: `query_order_options` (shipping and payment codes),
 `preview_order` (`cart_key`, `currency_code`, `shipping_code`, `payment_method`),
 `submit_order` (the same, plus the preview's `total`), and the user's answer in the form.
 
@@ -190,7 +190,7 @@ claude mcp add mouser --env MOUSER_SEARCH_API_KEY_FILE=$HOME/.config/mouser/sear
 | `MOUSER_MAX_ORDER_TOTAL` | — | Order ceiling in the order's currency; required to order |
 | `MOUSER_MAX_CALLS_PER_MINUTE` | `30` | Client-side spacing of calls (Mouser limits calls per key) |
 | `MOUSER_TIMEOUT_MS` | `30000` | HTTP timeout |
-| `MOUSER_API_BASE` | `https://api.mouser.com/api` | API root (tests) |
+| `MOUSER_API_BASE` | `https://api.mouser.com/api` | API root (tests and the demo) |
 
 At least one key is required. `RUST_LOG=mouser=debug` logs each call (never the key) to stderr.
 

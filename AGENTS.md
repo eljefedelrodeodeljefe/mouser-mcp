@@ -1,6 +1,6 @@
-# AGENTS.md — conventions for `mouser-mcp`
+# AGENTS.md: conventions for `mouser-mcp`
 
-Ported from `rigol-mcp` (itself from `mikrotik-mcp`) so muscle memory transfers.
+Ported from `rigol-mcp` (itself from `mikrotik-mcp`): the three repositories share these conventions.
 
 ## Branching and commits
 
@@ -14,14 +14,14 @@ patch, `feat!:` or a `BREAKING CHANGE:` footer bumps major. One logical change p
 ## Layout
 
 ```text
-crates/mouser/          library — no MCP types cross into here
+crates/mouser/          library; no MCP types cross into here
   src/models.rs         generated from Mouser's Swagger documents (tools/gen_models.py)
   src/client.rs         one method per endpoint; validation, key handling, order checks
   src/error.rs          typed errors
   examples/probe.rs     read-only check of a live key
   tests/api.rs          the client against a mock Mouser API (wiremock)
 crates/mouser-mcp/      binary
-  src/server.rs         MCP adapter — #[tool] stubs only; one router per key
+  src/server.rs         MCP adapter: #[tool] stubs only; one router per key
   src/confirm.rs        the user's order confirmation (elicitation form, summary, pending store)
   src/tools.rs          pure logic, returns anyhow::Result<Value>
   src/params.rs         Deserialize + JsonSchema argument structs
@@ -48,18 +48,19 @@ Mouser's own names are kept (serde renames), including its misspellings
 
 ## Safety rules specific to this server
 
-Ordering spends real money. These are not negotiable:
+Ordering spends real money. These rules have no exceptions:
 
 - Only `Client::submit_order` and `Client::submit_order_from_order` may send
   `SubmitOrder: true`. Every other path forces `false`.
 - A submission previews again and goes ahead only if currency, total and every line match
-  what the caller confirmed, and the total is within `Config::max_order_total`. No ceiling
-  configured means no order. These checks live in the library, not the tool layer; do not add
-  a parameter that relaxes them.
+  what was confirmed, and the total is within `Config::max_order_total`. No ceiling
+  configured means no order. These checks live in the library, below the tool layer; do not
+  add a parameter that relaxes them.
 - After those checks and before submitting, the user confirms the order in an MCP
-  elicitation form (`crates/mouser-mcp/src/confirm.rs`). Only an accepted form with
-  `place_order: true` goes ahead; a client without form elicitation cannot order. Never add a
-  path that submits without that answer.
+  elicitation form (`crates/mouser-mcp/src/confirm.rs`). Only an accepted form with every
+  line still selected and `place_order: true` goes ahead, and the lines a submission must
+  match are the ones shown in that form. A client without form elicitation cannot order.
+  Every path that submits goes through that answer.
 - Cart changes and orders are separate gates (`MOUSER_ALLOW_CART_WRITES`,
   `MOUSER_ALLOW_ORDERS`); neither implies the other.
 - Never log a URL or a request: the key is in the query string. Transport errors are stripped
@@ -72,7 +73,7 @@ Ordering spends real money. These are not negotiable:
   commits are authored by the human who reviews and accepts the change.
 - Don't hand-roll parsing. Dates go through `time`, money through `rusty_money` (each
   currency's own separators) into exact `rust_decimal` amounts, JSON through `serde`. A value
-  that does not parse is reported as unreadable, never guessed.
+  that does not parse is reported as unreadable.
 - Don't add dependencies casually; justify each in the commit message. `cargo deny check`
   (advisories, licences, sources: `deny.toml`) runs in CI.
 - Don't disable lints to make CI pass.
