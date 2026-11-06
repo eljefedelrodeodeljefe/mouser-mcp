@@ -5,3 +5,6 @@
 .DS_Store
 # API keys never live in the repo
 *api-key*
+
+# rendered recordings: the GIFs are committed, the MP4s are for posting elsewhere
+demo/*.mp4
