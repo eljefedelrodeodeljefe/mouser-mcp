@@ -50,6 +50,14 @@ pub enum Error {
     /// `submit_order` refused: the order Mouser would place now differs from the one confirmed.
     #[error("order not submitted: {0}")]
     OrderMismatch(String),
+
+    /// The call that places an order (`SubmitOrder: true`) failed in transport after it was
+    /// sent: Mouser may have placed the order. Look in the order history before submitting
+    /// again; a blind retry can order twice. The source is the transport error.
+    #[error(
+        "the order may have been placed: the submission was sent and no answer came back; check the order history before submitting again"
+    )]
+    SubmitOutcomeUnknown(#[source] Box<Error>),
 }
 
 fn format_errors(errs: &[ErrorEntity]) -> String {

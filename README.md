@@ -62,6 +62,12 @@ own gate, and every order needs the person's confirmation:
    confirmation stays on the server, is single use, expires after ten minutes and is bound to
    the exact arguments of the call, so an answer cannot be replayed onto another order.
 
+5. **No answer is not "nothing happened".** If the submission times out or the connection
+   drops after it was sent, Mouser may have placed the order. The tool then fails with its
+   own error (code `-32001`, "the order may have been placed") instead of a transport error,
+   and says to look for the order (`order_history_by_date_filter` with `Today`, or
+   `get_order`) before submitting again. The server never retries a submission.
+
 An order takes four steps: `query_order_options` (shipping and payment codes),
 `preview_order` (`cart_key`, `currency_code`, `shipping_code`, `payment_method`),
 `submit_order` (the same, plus the preview's `total`), and the user's answer in the form.
@@ -155,6 +161,9 @@ chmod 600 ~/.config/mouser/*-api-key
   charge). Mouser fills in the order type (for example `Rush`: ship what is in stock first).
 - **Ordering needs a client that shows MCP forms** (elicitation), as Claude Code does: the
   person confirms the order there. Without one, `submit_order` refuses.
+- **"The order may have been placed"** means the submission went out and no answer came
+  back. Check the order history (or Mouser's website) before you submit again: a second
+  submission can place a second order.
 - **API carts have their own `CartKey`.** Keep the key the tools return; whether an API cart
   also shows up in the website's basket has not been verified.
 

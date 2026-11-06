@@ -814,6 +814,7 @@ impl Client {
             Some(&body),
         )
         .await
+        .map_err(outcome_unknown)
     }
 
     /// `POST /api/v1/order/CreateFromOrder` with `SubmitOrder` false: summary of re-ordering
@@ -866,6 +867,7 @@ impl Client {
             Some(&body),
         )
         .await
+        .map_err(outcome_unknown)
     }
 
     /// `POST /api/v1/order/item/CreateCartFromOrder` — a new cart holding an earlier order's
@@ -940,6 +942,19 @@ impl Client {
             )));
         }
         Ok(())
+    }
+}
+
+/// A transport failure of the call that places an order: the request may have reached
+/// Mouser, so the order may exist. Every other failure is an answer from Mouser and stays
+/// what it is.
+fn outcome_unknown(e: Error) -> Error {
+    match e {
+        Error::Transport(_) => {
+            tracing::warn!(error = %e, "order outcome unknown: the submission failed after it was sent");
+            Error::SubmitOutcomeUnknown(Box::new(e))
+        }
+        e => e,
     }
 }
 

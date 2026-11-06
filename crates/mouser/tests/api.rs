@@ -428,3 +428,66 @@ async fn order_options_decode_enum_numbers_where_swagger_documents_strings() {
         "1"
     );
 }
+
+#[tokio::test]
+async fn a_submission_that_times_out_may_have_placed_the_order() {
+    let server = MockServer::start().await;
+    mount_order(&server, false, order_reply(200.0, 2), 1).await;
+    // Mouser takes the order, and the reply arrives after the client gave up.
+    Mock::given(method("POST"))
+        .and(path("/api/v1/order"))
+        .and(body_json(
+            json!({"Order": {"CartKey": "cart-1", "CurrencyCode": "EUR", "SubmitOrder": true}}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(order_reply(200.0, 2))
+                .set_delay(std::time::Duration::from_millis(1500)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = Client::new(Config {
+        base_url: format!("{}/api", server.uri()),
+        order_key: Some(ApiKey::new(ORDER_KEY).unwrap()),
+        max_calls_per_minute: 0,
+        max_order_total: Some(500.0),
+        timeout: std::time::Duration::from_millis(500),
+        ..Config::default()
+    })
+    .unwrap();
+    let e = c
+        .submit_order(&order_request(), &expected(200.0))
+        .await
+        .unwrap_err();
+    assert!(matches!(e, Error::SubmitOutcomeUnknown(_)), "{e:?}");
+    let source = std::error::Error::source(&e).expect("the transport error is kept");
+    assert!(source.to_string().contains("transport"), "{source}");
+    assert!(!format!("{e:?}").contains(ORDER_KEY), "{e:?}");
+
+    // A transport failure of the preview placed nothing: it stays a transport error.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/order"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(order_reply(200.0, 2))
+                .set_delay(std::time::Duration::from_millis(1500)),
+        )
+        .mount(&server)
+        .await;
+    let c = Client::new(Config {
+        base_url: format!("{}/api", server.uri()),
+        order_key: Some(ApiKey::new(ORDER_KEY).unwrap()),
+        max_calls_per_minute: 0,
+        max_order_total: Some(500.0),
+        timeout: std::time::Duration::from_millis(500),
+        ..Config::default()
+    })
+    .unwrap();
+    let e = c
+        .submit_order(&order_request(), &expected(200.0))
+        .await
+        .unwrap_err();
+    assert!(matches!(e, Error::Transport(_)), "{e:?}");
+}

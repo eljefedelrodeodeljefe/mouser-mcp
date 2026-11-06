@@ -61,6 +61,10 @@ Ordering spends real money. These rules have no exceptions:
   line still selected and `place_order: true` goes ahead, and the lines a submission must
   match are the ones shown in that form. A client without form elicitation cannot order.
   Every path that submits goes through that answer.
+- A submission that fails in transport once it was sent (timeout, dropped connection) may
+  have placed the order. It is `Error::SubmitOutcomeUnknown`, never a plain transport error,
+  and its MCP error (code `-32001`) says to check the order history before submitting again.
+  Nothing retries a submission.
 - Cart changes and orders are separate gates (`MOUSER_ALLOW_CART_WRITES`,
   `MOUSER_ALLOW_ORDERS`); neither implies the other.
 - Never log a URL or a request: the key is in the query string. Transport errors are stripped

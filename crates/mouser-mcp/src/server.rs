@@ -802,24 +802,35 @@ mod tests {
     }
 
     /// Calls submit_order through an MCP client speaking `protocol`; returns the tool's text
-    /// or the error, and what the user was shown.
+    /// or the error (`[code] message`), and what the user was shown.
     async fn order_through_mcp(
         mouser: &MockServer,
         protocol: ProtocolVersion,
         answer: Option<Reply>,
     ) -> (Result<String, String>, Vec<(String, Value)>) {
-        let server = MouserServer::new(
-            Config {
-                base_url: format!("{}/api", mouser.uri()),
-                order_key: Some(ApiKey::new("test-order-key-00000").unwrap()),
-                max_calls_per_minute: 0,
-                max_order_total: Some(500.0),
-                ..Config::default()
-            },
-            false,
-            true,
-        )
-        .unwrap();
+        let args = json!({"cart_key": "cart-1", "currency_code": "EUR", "total": 200.0});
+        call_through_mcp(mouser, protocol, answer, "submit_order", args, |_| {}).await
+    }
+
+    /// Calls `tool` with `args` through an MCP client speaking `protocol`, against a server
+    /// configured for `mouser` and then by `tweak`.
+    async fn call_through_mcp(
+        mouser: &MockServer,
+        protocol: ProtocolVersion,
+        answer: Option<Reply>,
+        tool: &'static str,
+        args: Value,
+        tweak: impl FnOnce(&mut Config),
+    ) -> (Result<String, String>, Vec<(String, Value)>) {
+        let mut cfg = Config {
+            base_url: format!("{}/api", mouser.uri()),
+            order_key: Some(ApiKey::new("test-order-key-00000").unwrap()),
+            max_calls_per_minute: 0,
+            max_order_total: Some(500.0),
+            ..Config::default()
+        };
+        tweak(&mut cfg);
+        let server = MouserServer::new(cfg, false, true).unwrap();
         let shown = Arc::new(Mutex::new(vec![]));
         let can_ask = answer.is_some();
         let user = User {
@@ -862,15 +873,14 @@ mod tests {
                 });
                 let client =
                     serve_directly::<RoleClient, _, _, _, _>(user, ct, Some(server_info.into()));
-                let args = json!({"cart_key": "cart-1", "currency_code": "EUR", "total": 200.0});
-                let mut call = CallToolRequestParams::new("submit_order")
+                let mut call = CallToolRequestParams::new(tool)
                     .with_arguments(args.as_object().unwrap().clone());
                 call.meta = request_meta;
                 let r = client.call_tool(call).await;
                 srv.abort();
                 match r {
                     Ok(r) => Ok(r.content[0].as_text().unwrap().text.clone()),
-                    Err(ServiceError::McpError(e)) => Err(e.message.to_string()),
+                    Err(ServiceError::McpError(e)) => Err(format!("[{}] {}", e.code.0, e.message)),
                     Err(e) => Err(e.to_string()),
                 }
             })
@@ -959,5 +969,44 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_submission_without_an_answer_says_the_order_may_exist() {
+        let mouser = MockServer::start().await;
+        mount_order(&mouser, false, 1..).await;
+        // Mouser places the order; its answer comes after the client's timeout.
+        Mock::given(method("POST"))
+            .and(path("/api/v1/order"))
+            .and(body_json(
+                json!({"Order": {"CartKey": "cart-1", "CurrencyCode": "EUR", "SubmitOrder": true}}),
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"Order": {"Errors": [], "OrderId": "placed-1"}}))
+                    .set_delay(Duration::from_millis(1500)),
+            )
+            .expect(1)
+            .mount(&mouser)
+            .await;
+        let args = json!({"cart_key": "cart-1", "currency_code": "EUR", "total": 200.0});
+        let (r, _) = call_through_mcp(
+            &mouser,
+            ProtocolVersion::V_2025_06_18,
+            Some(yes()),
+            "submit_order",
+            args,
+            |c| c.timeout = Duration::from_millis(500),
+        )
+        .await;
+        let e = r.expect_err("no answer from Mouser");
+        assert!(
+            e.starts_with("[-32001] the order may have been placed"),
+            "{e}"
+        );
+        assert!(
+            e.contains("get_order") && e.contains("order_history"),
+            "{e}"
+        );
     }
 }
