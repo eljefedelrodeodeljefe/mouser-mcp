@@ -96,10 +96,21 @@ fn key_from_env(name: &str) -> anyhow::Result<Option<ApiKey>> {
     }
 }
 
-fn env_bool(name: &str) -> bool {
-    std::env::var(name)
-        .map(|v| matches!(v.as_str(), "true" | "1" | "yes"))
-        .unwrap_or(false)
+/// A yes/no setting: unset is no; true/false, 1/0 or yes/no in any case; anything else stops
+/// the server, so `TRUE` or a typo never quietly means "no".
+fn env_bool(name: &str) -> anyhow::Result<bool> {
+    flag(name, std::env::var(name).ok().as_deref())
+}
+
+fn flag(name: &str, value: Option<&str>) -> anyhow::Result<bool> {
+    let Some(v) = value else {
+        return Ok(false);
+    };
+    match v.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" => Ok(true),
+        "false" | "0" | "no" => Ok(false),
+        _ => anyhow::bail!("{name}: {v:?} is not a yes/no value; use true or false"),
+    }
 }
 
 /// `MOUSER_MAX_ORDER_TOTAL`: an amount and its currency, `"500 EUR"`. A bare amount is
@@ -148,8 +159,8 @@ impl MouserServer {
         };
         Self::new(
             cfg,
-            env_bool("MOUSER_ALLOW_CART_WRITES"),
-            env_bool("MOUSER_ALLOW_ORDERS"),
+            env_bool("MOUSER_ALLOW_CART_WRITES")?,
+            env_bool("MOUSER_ALLOW_ORDERS")?,
         )
     }
 
@@ -698,6 +709,22 @@ mod tests {
             .tool_names();
         assert_eq!(all.len(), 6 + 8 + 13, "{all:?}");
         assert!(all.contains(&"submit_order".to_string()) && all.contains(&"get_cart".to_string()));
+    }
+
+    #[test]
+    fn a_yes_no_setting_is_one_of_six_words_or_an_error() {
+        let f = |v: &str| flag("MOUSER_ALLOW_ORDERS", Some(v));
+        for v in ["true", "TRUE", "True", "1", "yes", "YES", " true "] {
+            assert!(f(v).unwrap(), "{v:?}");
+        }
+        for v in ["false", "FALSE", "0", "no", "No"] {
+            assert!(!f(v).unwrap(), "{v:?}");
+        }
+        assert!(!flag("MOUSER_ALLOW_ORDERS", None).unwrap(), "unset");
+        for v in ["treu", "on", "off", "y", "", "2", "enabled"] {
+            let e = f(v).unwrap_err().to_string();
+            assert!(e.starts_with("MOUSER_ALLOW_ORDERS:"), "{v:?}: {e}");
+        }
     }
 
     #[test]

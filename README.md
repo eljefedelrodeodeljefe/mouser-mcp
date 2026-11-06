@@ -209,7 +209,9 @@ claude mcp add mouser --env MOUSER_SEARCH_API_KEY_FILE=$HOME/.config/mouser/sear
 | `MOUSER_TIMEOUT_MS` | `30000` | HTTP timeout |
 | `MOUSER_API_BASE` | `https://api.mouser.com/api` | API root (tests and the demo) |
 
-At least one key is required. The server logs to stderr at `info` unless `RUST_LOG` says
+At least one key is required. The `MOUSER_ALLOW_*` switches take `true`/`false`, `1`/`0` or
+`yes`/`no` in any case; any other value stops the server with an error naming the variable.
+The server logs to stderr at `info` unless `RUST_LOG` says
 otherwise: each submission, each order placed (its id, total and currency, never the address)
 and each refusal. `RUST_LOG=mouser=debug` also logs each call (never the key).
 
