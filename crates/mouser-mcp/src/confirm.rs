@@ -4,10 +4,11 @@
 //! shows a form and returns what the user chose. A model can neither see the form nor answer
 //! it.
 //!
-//! The form has a one-line summary (total, shipping, payment, ship-to) and one checkbox per
-//! order line, ticked, followed by "Place this order", unticked. Clients step through form
-//! fields with the keyboard, so every line is in reach however long the order is. Only an
-//! accepted form with every box ticked confirms; unticking a line refuses the order.
+//! The form has a one-line summary (total, shipping, payment, ship-to) and two fields: "Order
+//! lines", a multi-select list with one option per line, all selected, and "Place this
+//! order", a checkbox, unticked. Clients step through the list with the keyboard, so every
+//! line is in reach however long the order is. Only an accepted form with every line still
+//! selected and the box ticked confirms; deselecting a line refuses the order.
 //!
 //! Two protocol paths:
 //!
@@ -36,7 +37,11 @@ pub const TTL: Duration = Duration::from_secs(10 * 60);
 /// Key of the form in `inputRequests` / `inputResponses`.
 pub const INPUT_KEY: &str = "confirm_order";
 
-/// The final checkbox. Sorts after the `line_…` fields (clients list fields in key order).
+/// The multi-select list of order lines. Sorts before [`PLACE`] (clients list fields in key
+/// order).
+pub const LINES: &str = "lines";
+
+/// The checkbox that places the order.
 pub const PLACE: &str = "place_order";
 
 fn money(v: Option<f64>) -> String {
@@ -47,11 +52,12 @@ fn money(v: Option<f64>) -> String {
 pub struct Form {
     pub message: String,
     pub schema: ElicitationSchema,
-    /// The checkbox keys, lines first, then [`PLACE`].
+    /// The values of the [`LINES`] options, one per order line.
     pub keys: Vec<String>,
 }
 
-/// Builds the form: a one-line message and one ticked checkbox per line.
+/// Builds the form: a one-line message, the lines as a multi-select list, all selected, and
+/// an unticked "Place this order".
 pub fn form(preview: &OrderRoot, ceiling: Option<f64>) -> Form {
     let o = preview.order.clone().unwrap_or_default();
     let cur = o.currency_code.as_deref().unwrap_or("?");
@@ -102,15 +108,21 @@ pub fn form(preview: &OrderRoot, ceiling: Option<f64>) -> Form {
     if let Some(c) = ceiling {
         message += &format!(" Ceiling {c:.2}.");
     }
-    message += " Every line is ticked; untick one to stop. Tick \"Place this order\" to buy.";
+    message += " All lines are selected; deselect one to stop. Tick \"Place this order\" to buy.";
 
     let width = lines.len().max(1).to_string().len().max(2);
-    let mut props = serde_json::Map::new();
+    let mut options = vec![];
     let mut keys = vec![];
     for (i, l) in lines.iter().enumerate() {
         let key = format!("line_{:0width$}", i + 1);
+        let reference = l
+            .cart_item_cust_part_number
+            .as_deref()
+            .filter(|r| !r.is_empty())
+            .map(|r| format!("  ({r})"))
+            .unwrap_or_default();
         let title = format!(
-            "{} × {}  {} each  = {} {cur}",
+            "{} × {}  {} each  = {} {cur}{reference}",
             l.quantity.unwrap_or(0),
             l.mfr_part_number
                 .as_deref()
@@ -119,22 +131,16 @@ pub fn form(preview: &OrderRoot, ceiling: Option<f64>) -> Form {
             money(l.unit_price),
             money(l.extended_price),
         );
-        let description = [
-            l.mouser_part_number.as_deref(),
-            l.description.as_deref(),
-            l.cart_item_cust_part_number.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(" · ");
-        props.insert(
-            key.clone(),
-            json!({"type": "boolean", "title": title, "description": description, "default": true}),
-        );
+        options.push(json!({"const": key, "title": title}));
         keys.push(key);
     }
+    let mut props = serde_json::Map::new();
+    props.insert(
+        LINES.into(),
+        json!({"type": "array", "title": "Order lines",
+            "description": "Everything in this order. Deselect any line to stop the order.",
+            "items": {"anyOf": options}, "default": keys}),
+    );
     props.insert(
         PLACE.into(),
         json!({"type": "boolean",
@@ -142,11 +148,10 @@ pub fn form(preview: &OrderRoot, ceiling: Option<f64>) -> Form {
             "description": "A real purchase, charged to the payment method above",
             "default": false}),
     );
-    keys.push(PLACE.into());
     let schema = serde_json::from_value(json!({
-        "type": "object", "properties": props, "required": keys,
+        "type": "object", "properties": props, "required": [LINES, PLACE],
     }))
-    // Only boolean fields with a title, a description and a default: always a valid schema.
+    // A titled multi-select and a boolean, built from strings: always a valid schema.
     .expect("order form schema");
     Form {
         message,
@@ -163,7 +168,7 @@ pub enum Answer {
 }
 
 /// Reads an elicitation result (`{"action": …, "content": {…}}`): only an accepted form with
-/// every one of `keys` true confirms.
+/// every one of `keys` still selected in [`LINES`] and [`PLACE`] ticked confirms.
 pub fn answer(response: Option<&Value>, keys: &[String]) -> Answer {
     let Some(r) = response else {
         return Answer::Refused("no answer to the confirmation form".into());
@@ -174,22 +179,22 @@ pub fn answer(response: Option<&Value>, keys: &[String]) -> Answer {
         None => return Answer::Refused("the confirmation answer has no action".into()),
     }
     let content = r.get("content");
-    let unticked: Vec<&str> = keys
+    let selected: Vec<&str> = content
+        .and_then(|c| c.get(LINES))
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let dropped: Vec<&str> = keys
         .iter()
-        .filter(|k| {
-            content
-                .and_then(|c| c.get(k.as_str()))
-                .and_then(Value::as_bool)
-                != Some(true)
-        })
         .map(String::as_str)
+        .filter(|k| !selected.contains(k))
         .collect();
-    if unticked.is_empty() {
-        Answer::Confirmed
-    } else if unticked == [PLACE] {
-        Answer::Refused("the user did not tick \"Place this order\"".into())
-    } else {
-        Answer::Refused(format!("the user unticked {}", unticked.join(", ")))
+    if !dropped.is_empty() {
+        return Answer::Refused(format!("the user deselected {}", dropped.join(", ")));
+    }
+    match content.and_then(|c| c.get(PLACE)).and_then(Value::as_bool) {
+        Some(true) => Answer::Confirmed,
+        _ => Answer::Refused("the user did not tick \"Place this order\"".into()),
     }
 }
 
@@ -265,7 +270,7 @@ mod tests {
                 order_total: 533.78,
                 lines: vec![("139-ZX10R-2-183-S+".into(), 2)],
             },
-            keys: vec!["line_01".into(), PLACE.into()],
+            keys: vec!["line_01".into()],
         }
     }
 
@@ -289,28 +294,27 @@ mod tests {
     }
 
     #[test]
-    fn only_an_accepted_form_with_every_box_ticked_confirms() {
-        let keys: Vec<String> = vec!["line_01".into(), "line_02".into(), PLACE.into()];
+    fn only_an_accepted_form_with_every_line_and_the_box_confirms() {
+        let keys: Vec<String> = vec!["line_01".into(), "line_02".into()];
         let a = |v: Value| answer(Some(&v), &keys);
-        let all = json!({"line_01": true, "line_02": true, "place_order": true});
+        let all = json!({"lines": ["line_02", "line_01"], "place_order": true});
         assert_eq!(
             a(json!({"action": "accept", "content": all})),
             Answer::Confirmed
         );
         assert_eq!(
-            a(
-                json!({"action": "accept", "content": {"line_01": true, "line_02": false, "place_order": true}})
-            ),
-            Answer::Refused("the user unticked line_02".into())
+            a(json!({"action": "accept", "content": {"lines": ["line_01"], "place_order": true}})),
+            Answer::Refused("the user deselected line_02".into())
         );
         assert_eq!(
             a(
-                json!({"action": "accept", "content": {"line_01": true, "line_02": true, "place_order": false}})
+                json!({"action": "accept", "content": {"lines": ["line_01", "line_02"], "place_order": false}})
             ),
             Answer::Refused("the user did not tick \"Place this order\"".into())
         );
         for v in [
             json!({"action": "accept", "content": {"place_order": true}}),
+            json!({"action": "accept", "content": {"lines": "line_01,line_02", "place_order": true}}),
             json!({"action": "accept"}),
             json!({"action": "decline"}),
             json!({"action": "cancel", "content": all}),
@@ -337,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn the_form_has_a_one_line_summary_and_a_ticked_box_per_line() {
+    fn the_form_has_a_one_line_summary_a_list_of_lines_and_one_box() {
         let f = form(&preview(2), Some(650.0));
         assert!(!f.message.contains('\n'), "{}", f.message);
         for want in [
@@ -355,15 +359,20 @@ mod tests {
                 f.message
             );
         }
-        assert_eq!(f.keys, ["line_01", "line_02", "place_order"]);
+        assert_eq!(f.keys, ["line_01", "line_02"]);
         let v = serde_json::to_value(&f.schema).unwrap();
-        let line = &v["properties"]["line_01"];
-        assert_eq!(line["type"], "boolean");
-        assert_eq!(line["default"], true);
-        assert_eq!(line["title"], "2 × PART-1  161.10 each  = 322.20 EUR");
-        assert_eq!(line["description"], "139-PART-1 · RF splitter · WP6");
+        let props = v["properties"].as_object().unwrap();
+        assert_eq!(props.keys().collect::<Vec<_>>(), ["lines", "place_order"]);
+        let lines = &v["properties"]["lines"];
+        assert_eq!(lines["type"], "array");
+        assert_eq!(lines["default"], json!(["line_01", "line_02"]));
+        assert_eq!(
+            lines["items"]["anyOf"][0],
+            json!({"const": "line_01", "title": "2 × PART-1  161.10 each  = 322.20 EUR  (WP6)"})
+        );
+        assert_eq!(v["properties"]["place_order"]["type"], "boolean");
         assert_eq!(v["properties"]["place_order"]["default"], false);
-        assert_eq!(v["required"].as_array().unwrap().len(), 3);
+        assert_eq!(v["required"], json!(["lines", "place_order"]));
     }
 
     #[test]

@@ -49,11 +49,12 @@ so they are gated separately, and an order is never a side effect:
    placed and the caller gets an *invalid params* error explaining what changed.
 4. **The user confirms in a form, not the model.** Before placing it, the server asks the
    person at the MCP client through [elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation).
-   The form has a one-line summary (total, shipping, tax, payment, ship-to), one ticked box
-   per order line (quantity, part, unit price, line total), and "Place this order", unticked.
-   Clients step through form fields with the keyboard, so a long order stays readable. Only an
-   accepted form with every box ticked places the order, and only if Mouser's final preview
-   still has exactly the lines confirmed; unticking a line, declining, cancelling or not
+   The form has a one-line summary (total, shipping, tax, payment, ship-to), "Order lines",
+   a list of every line (quantity, part, unit price, line total, your line reference) with all
+   of them selected, and "Place this order", a checkbox, unticked. Clients step through the
+   list with the keyboard, so a long order stays readable. Only an accepted form with every
+   line still selected and the box ticked places the order, and only if Mouser's final preview
+   still has exactly the lines confirmed; deselecting a line, declining, cancelling or not
    answering places nothing. A client that cannot show forms cannot order. On protocol
    `2026-07-28` the form travels as an `InputRequiredResult` (multi round-trip); the pending
    confirmation stays on the server, is single use, expires after ten minutes and is bound to
