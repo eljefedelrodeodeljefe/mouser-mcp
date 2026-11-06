@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.1](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.6.0...v0.6.1) (2026-11-06)
+
+
+### Documentation
+
+* **demo:** one recording that follows the session, cut into two clips ([42b4b4f](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/42b4b4f816c22ad075267bd6c8517f9ecd22f08d))
+* **demo:** the stand-in Mouser API answers like the session it replays ([0f74227](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/0f74227f5ef0006f97007ca4f7123910ae1c0c02))
+* **demo:** the stand-in searches the way Mouser does ([d1a8964](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/d1a89643c31f3fd92d94b81bfe8f9be8b8f18197))
+* lead the README with a real session; one demo recording that follows it ([58e65d1](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/58e65d1ab675f66f4c42dfc0265b6e3947363ba6))
+* lead the README with what the server did in a real session ([7aff17b](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/7aff17b52a5128e83f6157e5b3eb26de895e70b4))
+
 ## [0.6.0](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.5.0...v0.6.0) (2026-11-06)
 
 
