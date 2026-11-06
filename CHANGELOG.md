@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.3.0...v0.4.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* preview_order and submit_order take cart_key, currency_code, shipping_code and payment_method instead of Mouser's OrderRequestType, and submit_order takes the preview's total instead of an expected block with every line. The lines a submission must match are the ones the user confirmed in the form. submit_order_from_order takes total instead of expected likewise.
+
+### Features
+
+* an order form with a box per line; submit_order takes the total, not the lines ([#9](https://github.com/eljefedelrodeodeljefe/mouser-mcp/issues/9)) ([b42531d](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/b42531dcab9eb27e8a06227b89643d768ef080cc))
+
+
+### Bug Fixes
+
+* read the client's capabilities from each request on protocol 2026-07-28 ([#8](https://github.com/eljefedelrodeodeljefe/mouser-mcp/issues/8)) ([7b4234d](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/7b4234d910203a887556ff4e5151ee871728064a))
+
 ## [0.3.0](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.2.0...v0.3.0) (2026-11-06)
 
 
