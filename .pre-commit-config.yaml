@@ -9,6 +9,8 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: ["--maxkb=512"]
+        # the demo recordings (demo/README.md) and their tapes are wanted assets
+        exclude: ^demo/.*\.(gif|tape)$
 
   - repo: https://github.com/crate-ci/typos
     rev: v1.49.0

@@ -13,16 +13,17 @@ Require claude
 Require python3
 
 Set Shell bash
-Set FontSize 18
+Set FontSize 16
 Set Width 1400
-Set Height 900
+Set Height 1000
 Set Padding 24
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 35ms
 Set WindowBar Colorful
 
 Hide
-Type "demo/setup.sh && clear" Enter
+# A recording started from inside Claude Code inherits its session markers: clear them.
+Type "unset $(compgen -v CLAUDE); demo/setup.sh && clear" Enter
 Sleep 8s
 Show
 

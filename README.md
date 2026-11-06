@@ -7,6 +7,8 @@
 **Let an AI agent price your BOM at Mouser: live stock, lead times and price breaks, carts,
 order history, and ordering that never happens by accident.**
 
+![Ordering from Claude Code: the model prepares the cart and the preview, the person confirms the order in a form](demo/order.gif)
+
 A Rust SDK (`mouser`) and an [MCP](https://modelcontextprotocol.io) server (`mouser-mcp`) for
 the complete [Mouser API](https://www.mouser.com/api-hub/): every endpoint of Mouser's Swagger
 documents, typed. Point Claude Code, Cursor or any MCP client at it and ask "is everything on
@@ -69,6 +71,10 @@ transport errors, scrubs the key from any reply that echoes it, and redacts `Api
 `Debug`.
 
 ## Demo
+
+Pricing a BOM from one prompt: stock, price breaks, and the line Mouser cannot deliver.
+
+![Pricing a BOM at Mouser from Claude Code](demo/price-bom.gif)
 
 The confirmation form in Claude Code, captured from the [demo](demo/) (stand-in Mouser API,
 demo data, nothing bought). The model prepared the cart and the preview; only the person can
