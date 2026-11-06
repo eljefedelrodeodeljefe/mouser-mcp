@@ -48,14 +48,20 @@ so they are gated separately, and an order is never a side effect:
    confirmed: currency, total and every line. If the price moved since the preview, nothing is
    placed and the caller gets an *invalid params* error explaining what changed.
 4. **The user confirms in a form, not the model.** Before placing it, the server asks the
-   person at the MCP client through [elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation):
-   a form with the amount, the lines, shipping, tax, ship-to address and payment, and a
-   "Place this order" box. Only an accepted form with the box ticked places the order; decline,
-   cancel or no answer places nothing. A client that cannot show forms cannot order. On
-   protocol `2026-07-28` the form travels as an `InputRequiredResult` (multi round-trip); the
-   pending confirmation stays on the server, is single use, expires after ten minutes and is
-   bound to the exact arguments of the call, so an answer cannot be replayed onto another
-   order.
+   person at the MCP client through [elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation).
+   The form has a one-line summary (total, shipping, tax, payment, ship-to), one ticked box
+   per order line (quantity, part, unit price, line total), and "Place this order", unticked.
+   Clients step through form fields with the keyboard, so a long order stays readable. Only an
+   accepted form with every box ticked places the order, and only if Mouser's final preview
+   still has exactly the lines confirmed; unticking a line, declining, cancelling or not
+   answering places nothing. A client that cannot show forms cannot order. On protocol
+   `2026-07-28` the form travels as an `InputRequiredResult` (multi round-trip); the pending
+   confirmation stays on the server, is single use, expires after ten minutes and is bound to
+   the exact arguments of the call, so an answer cannot be replayed onto another order.
+
+An order takes four short calls: `query_order_options` (shipping and payment codes),
+`preview_order` (`cart_key`, `currency_code`, `shipping_code`, `payment_method`),
+`submit_order` (the same, plus the preview's `total`), and the user's answer in the form.
 
 Keys travel in Mouser's query string, so the client never logs URLs, strips them from
 transport errors, scrubs the key from any reply that echoes it, and redacts `ApiKey` in

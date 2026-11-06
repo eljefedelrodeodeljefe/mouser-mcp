@@ -1,6 +1,6 @@
 use anyhow::Context;
 use mouser::models::OrderRoot;
-use mouser::{ApiKey, Client, Config, KeyKind};
+use mouser::{ApiKey, Client, Config, ExpectedOrder, KeyKind};
 use rmcp::{
     RoleServer, ServerHandler,
     handler::server::{
@@ -13,13 +13,13 @@ use rmcp::{
         ErrorCode, ErrorData, Implementation, InputRequest, InputRequests, InputRequiredResult,
         InputResponses, JsonObject, ProtocolVersion, ServerCapabilities, ServerConfig,
     },
-    service::{ElicitationError, RequestContext},
+    service::RequestContext,
     tool, tool_handler, tool_router,
 };
 use serde_json::Value;
 use std::time::Duration;
 
-use crate::confirm::{self, Answer, OrderConfirmation};
+use crate::confirm::{self, Answer, Confirmed};
 use crate::error::tool_error;
 use crate::params::*;
 use crate::tools;
@@ -53,10 +53,17 @@ fn form_elicitation(caps: Option<&rmcp::model::ClientCapabilities>) -> bool {
         .is_some_and(|e| e.form.is_some() || e.url.is_none())
 }
 
+/// A multi round-trip retry's echoed state and the client's answers (both `None` on the first
+/// call and on protocols before 2026-07-28).
+struct Round {
+    state: Option<String>,
+    responses: Option<InputResponses>,
+}
+
 /// Whether an order goes ahead.
 enum Gate {
-    /// The user confirmed it.
-    Go,
+    /// The user confirmed it: submit, matching this.
+    Go(ExpectedOrder),
     /// Ask the user first: return this to the client.
     Ask(CallToolResponse),
 }
@@ -158,10 +165,11 @@ impl MouserServer {
         tool: &str,
         args: JsonObject,
         preview: &OrderRoot,
-        state: Option<String>,
-        responses: Option<InputResponses>,
+        expected: ExpectedOrder,
+        round: Round,
         ctx: &RequestContext<RoleServer>,
     ) -> Result<Gate, ErrorData> {
+        let Round { state, responses } = round;
         // Only a client that declared form elicitation shows the form to its user.
         if !can_show_forms(ctx) {
             tracing::warn!(
@@ -173,45 +181,53 @@ impl MouserServer {
                 "this MCP client cannot show a confirmation form (MCP elicitation), and orders need one",
             ));
         }
-        let text = confirm::summary(tool, preview, self.client.config().max_order_total);
+        let form = confirm::form(preview, self.client.config().max_order_total);
         let round_trip = ctx
             .protocol_version()
             .is_some_and(|v| v >= ProtocolVersion::V_2026_07_28);
+        let params = ElicitRequestParams::FormElicitationParams {
+            meta: None,
+            message: form.message,
+            requested_schema: form.schema,
+        };
         if round_trip {
             let Some(id) = state else {
-                let id = self.confirmations.open(tool, args);
+                let id = self.confirmations.open(
+                    tool,
+                    args,
+                    Confirmed {
+                        expected,
+                        keys: form.keys,
+                    },
+                );
                 let mut requests = InputRequests::new();
                 requests.insert(
                     confirm::INPUT_KEY.into(),
-                    InputRequest::Elicitation(ElicitRequest::new(
-                        ElicitRequestParams::FormElicitationParams {
-                            meta: None,
-                            message: text,
-                            requested_schema: confirm::schema(),
-                        },
-                    )),
+                    InputRequest::Elicitation(ElicitRequest::new(params)),
                 );
                 tracing::info!(tool, "asking the user to confirm an order");
                 return Ok(Gate::Ask(
                     InputRequiredResult::new(Some(requests), Some(id)).into(),
                 ));
             };
-            self.confirmations.take(&id, tool, &args).map_err(refused)?;
+            // What the user was shown, not what this round's preview says.
+            let confirmed = self.confirmations.take(&id, tool, &args).map_err(refused)?;
             let response = responses.as_ref().and_then(|r| r.get(confirm::INPUT_KEY));
-            return match confirm::answer(response) {
-                Answer::Confirmed => Ok(Gate::Go),
+            return match confirm::answer(response, &confirmed.keys) {
+                Answer::Confirmed => Ok(Gate::Go(confirmed.expected)),
                 Answer::Refused(why) => Err(refused(why)),
             };
         }
-        match ctx.peer.elicit::<OrderConfirmation>(text).await {
-            Ok(Some(c)) if c.place_order => Ok(Gate::Go),
-            Ok(_) => Err(refused("the user did not tick \"Place this order\"")),
-            Err(ElicitationError::UserDeclined) => Err(refused("the user declined")),
-            Err(ElicitationError::UserCancelled) => Err(refused("the user cancelled")),
-            Err(ElicitationError::CapabilityNotSupported) => Err(refused(
-                "this MCP client cannot show a confirmation form (MCP elicitation), and orders need one",
-            )),
-            Err(e) => Err(refused(format!("the confirmation failed: {e}"))),
+        let result = ctx
+            .peer
+            .create_elicitation(params)
+            .await
+            .map_err(|e| refused(format!("the confirmation failed: {e}")))?;
+        let response = serde_json::to_value(&result)
+            .map_err(|e| refused(format!("the confirmation failed: {e}")))?;
+        match confirm::answer(Some(&response), &form.keys) {
+            Answer::Confirmed => Ok(Gate::Go(expected)),
+            Answer::Refused(why) => Err(refused(why)),
         }
     }
 
@@ -506,7 +522,7 @@ impl MouserServer {
     }
 
     #[tool(
-        description = "Preview an order of a cart: lines, shipping, tax and OrderTotal, as Mouser would place it (POST /api/v1/order with SubmitOrder false — never places an order). Show the result to the user before any submit_order"
+        description = "Preview an order of a cart: lines, shipping, tax and OrderTotal, as Mouser would place it (POST /api/v1/order with SubmitOrder false — never places an order). Takes cart_key, currency_code and the shipping_code and payment_method that query_order_options lists"
     )]
     async fn preview_order(
         &self,
@@ -516,7 +532,7 @@ impl MouserServer {
     }
 
     #[tool(
-        description = "PLACE AN ORDER at Mouser — a real purchase (POST /api/v1/order with SubmitOrder true). Call after preview_order. Previews again; if CurrencyCode, OrderTotal and every line match `expected` and the total is within MOUSER_MAX_ORDER_TOTAL, the user is asked in a confirmation form from the MCP client (elicitation) showing the amount and a summary, and the order is placed only if they confirm there. Clients without elicitation cannot order. Requires MOUSER_ALLOW_ORDERS"
+        description = "PLACE AN ORDER at Mouser — a real purchase (POST /api/v1/order with SubmitOrder true). Same arguments as preview_order plus `total`, the preview's OrderTotal. Previews again; if the total matches and is within MOUSER_MAX_ORDER_TOTAL, the user gets a confirmation form from the MCP client (elicitation): a one-line summary, one ticked box per line, and \"Place this order\". The order is placed only if they accept with every box ticked, and Mouser's final preview still has exactly the lines they confirmed. Clients without elicitation cannot order. Requires MOUSER_ALLOW_ORDERS"
     )]
     async fn submit_order(
         &self,
@@ -527,16 +543,25 @@ impl MouserServer {
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         self.guard_orders()?;
-        tracing::warn!(currency = %p.expected.currency_code, total = p.expected.order_total, "submit_order requested");
-        let preview = tools::verified_preview(&self.client, &p)
+        tracing::warn!(currency = %p.order.currency_code, total = p.total, "submit_order requested");
+        let (preview, expected) = tools::verified_preview(&self.client, &p)
             .await
             .map_err(tool_error)?;
         match self
-            .confirm_order("submit_order", args, &preview, state, responses, &ctx)
+            .confirm_order(
+                "submit_order",
+                args,
+                &preview,
+                expected,
+                Round { state, responses },
+                &ctx,
+            )
             .await?
         {
             Gate::Ask(r) => Ok(r),
-            Gate::Go => Self::done(tools::submit_order(&self.client, &p).await).map(Into::into),
+            Gate::Go(expected) => {
+                Self::done(tools::submit_order(&self.client, &p, &expected).await).map(Into::into)
+            }
         }
     }
 
@@ -551,7 +576,7 @@ impl MouserServer {
     }
 
     #[tool(
-        description = "PLACE A RE-ORDER of an earlier order — a real purchase (POST /api/v1/order/CreateFromOrder with SubmitOrder true), with the same fresh-preview check and user confirmation form as submit_order. Requires MOUSER_ALLOW_ORDERS"
+        description = "PLACE A RE-ORDER of an earlier order — a real purchase (POST /api/v1/order/CreateFromOrder with SubmitOrder true). Takes `total`, the OrderTotal of preview_order_from_order; the same confirmation form as submit_order. Requires MOUSER_ALLOW_ORDERS"
     )]
     async fn submit_order_from_order(
         &self,
@@ -564,10 +589,10 @@ impl MouserServer {
         self.guard_orders()?;
         tracing::warn!(
             order_number = p.order_number,
-            total = p.expected.order_total,
+            total = p.total,
             "submit_order_from_order requested"
         );
-        let preview = tools::verified_preview_from_order(&self.client, &p)
+        let (preview, expected) = tools::verified_preview_from_order(&self.client, &p)
             .await
             .map_err(tool_error)?;
         match self
@@ -575,15 +600,16 @@ impl MouserServer {
                 "submit_order_from_order",
                 args,
                 &preview,
-                state,
-                responses,
+                expected,
+                Round { state, responses },
                 &ctx,
             )
             .await?
         {
             Gate::Ask(r) => Ok(r),
-            Gate::Go => {
-                Self::done(tools::submit_order_from_order(&self.client, &p).await).map(Into::into)
+            Gate::Go(expected) => {
+                Self::done(tools::submit_order_from_order(&self.client, &p, &expected).await)
+                    .map(Into::into)
             }
         }
     }
@@ -680,12 +706,30 @@ mod tests {
     use wiremock::matchers::{body_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    /// How the test user answers the form.
+    #[derive(Clone, Debug)]
+    struct Reply {
+        action: ElicitationAction,
+        /// tick "Place this order"
+        place: bool,
+        /// leave every line ticked
+        lines: bool,
+    }
+
+    fn yes() -> Reply {
+        Reply {
+            action: ElicitationAction::Accept,
+            place: true,
+            lines: true,
+        }
+    }
+
     /// A client whose user answers the confirmation form with `answer` (`None`: the client
-    /// cannot show forms), and remembers the text it was shown.
+    /// cannot show forms), and remembers the forms it was shown.
     #[derive(Clone)]
     struct User {
-        answer: Option<(ElicitationAction, bool)>,
-        shown: Arc<Mutex<Vec<String>>>,
+        answer: Option<Reply>,
+        shown: Arc<Mutex<Vec<(String, Value)>>>,
     }
 
     impl ClientHandler for User {
@@ -703,14 +747,33 @@ mod tests {
             request: ElicitRequestParams,
             _: RequestContext<RoleClient>,
         ) -> Result<rmcp::model::ElicitResult, ErrorData> {
-            if let ElicitRequestParams::FormElicitationParams { message, .. } = &request {
-                self.shown.lock().unwrap().push(message.clone());
-            }
-            let (action, tick) = self
+            let ElicitRequestParams::FormElicitationParams {
+                message,
+                requested_schema,
+                ..
+            } = &request
+            else {
+                panic!("not a form");
+            };
+            let schema = serde_json::to_value(requested_schema).unwrap();
+            self.shown
+                .lock()
+                .unwrap()
+                .push((message.clone(), schema.clone()));
+            let r = self
                 .answer
                 .clone()
                 .expect("no form for a client without elicitation");
-            Ok(ElicitResult::new(action).with_content(json!({"place_order": tick})))
+            let mut content = serde_json::Map::new();
+            for key in schema["properties"].as_object().unwrap().keys() {
+                let tick = if key == confirm::PLACE {
+                    r.place
+                } else {
+                    r.lines
+                };
+                content.insert(key.clone(), json!(tick));
+            }
+            Ok(ElicitResult::new(r.action).with_content(Value::Object(content)))
         }
     }
 
@@ -732,8 +795,8 @@ mod tests {
     async fn order_through_mcp(
         mouser: &MockServer,
         protocol: ProtocolVersion,
-        answer: Option<(ElicitationAction, bool)>,
-    ) -> (Result<String, String>, Vec<String>) {
+        answer: Option<Reply>,
+    ) -> (Result<String, String>, Vec<(String, Value)>) {
         let server = MouserServer::new(
             Config {
                 base_url: format!("{}/api", mouser.uri()),
@@ -788,11 +851,7 @@ mod tests {
                 });
                 let client =
                     serve_directly::<RoleClient, _, _, _, _>(user, ct, Some(server_info.into()));
-                let args = json!({
-                    "order": {"CartKey": "cart-1", "CurrencyCode": "EUR"},
-                    "expected": {"currency_code": "EUR", "order_total": 200.0,
-                        "lines": [["139-ZFRSC-42-S+", 2]]}
-                });
+                let args = json!({"cart_key": "cart-1", "currency_code": "EUR", "total": 200.0});
                 let mut call = CallToolRequestParams::new("submit_order")
                     .with_arguments(args.as_object().unwrap().clone());
                 call.meta = request_meta;
@@ -836,23 +895,22 @@ mod tests {
             let mouser = MockServer::start().await;
             mount_order(&mouser, true, 1).await;
             mount_order(&mouser, false, 1..).await;
-            let (r, shown) = order_through_mcp(
-                &mouser,
-                protocol.clone(),
-                Some((ElicitationAction::Accept, true)),
-            )
-            .await;
+            let (r, shown) = order_through_mcp(&mouser, protocol.clone(), Some(yes())).await;
             assert!(
                 r.as_ref().unwrap().contains("placed-1"),
                 "{protocol:?}: {r:?}"
             );
             assert_eq!(shown.len(), 1, "{protocol:?}");
+            let (message, schema) = &shown[0];
             assert!(
-                shown[0].contains("Place a real order at Mouser for 200.00 EUR?")
-                    && shown[0].contains("2 × 139-ZFRSC-42-S+"),
-                "{}",
-                shown[0]
+                message.starts_with("Real order at Mouser: 200.00 EUR (1 line"),
+                "{message}"
             );
+            assert_eq!(
+                schema["properties"]["line_01"]["title"],
+                "2 × 139-ZFRSC-42-S+  87.10 each  = 174.20 EUR"
+            );
+            assert_eq!(schema["properties"]["place_order"]["default"], false);
         }
     }
 
@@ -860,9 +918,22 @@ mod tests {
     async fn no_order_without_a_yes_from_the_user() {
         for protocol in [ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_06_18] {
             for answer in [
-                Some((ElicitationAction::Decline, false)),
-                Some((ElicitationAction::Cancel, true)),
-                Some((ElicitationAction::Accept, false)),
+                Some(Reply {
+                    action: ElicitationAction::Decline,
+                    ..yes()
+                }),
+                Some(Reply {
+                    action: ElicitationAction::Cancel,
+                    ..yes()
+                }),
+                Some(Reply {
+                    place: false,
+                    ..yes()
+                }),
+                Some(Reply {
+                    lines: false,
+                    ..yes()
+                }),
                 None, // a client that cannot show the form
             ] {
                 let mouser = MockServer::start().await;

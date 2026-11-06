@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 use mouser::models::*;
-use mouser::{Client, PartSearchOption, SearchOption};
+use mouser::{Client, ExpectedOrder, PartSearchOption, SearchOption};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
@@ -610,21 +610,48 @@ fn root(o: &OrderRequestType) -> OrderRequestRootType {
 }
 
 pub async fn preview_order(c: &Client, p: &OrderParams) -> Result<Value> {
-    to_value(c.preview_order(&root(&p.order)).await?)
+    to_value(c.preview_order(&root(&p.order.request())).await?)
 }
 
-/// A fresh preview of the order `p` would place, checked against what the caller confirmed
-/// and the ceiling, before the user is asked.
-pub async fn verified_preview(c: &Client, p: &SubmitOrderParams) -> Result<OrderRoot> {
-    let preview = c.preview_order(&root(&p.order)).await?;
-    c.verify_order(&preview, &p.expected)?;
-    Ok(preview)
+/// What a submission must find again: the preview's lines, and the total and currency the
+/// caller passed.
+fn expected_from(preview: &OrderRoot, currency: &str, total: f64) -> ExpectedOrder {
+    let lines = preview
+        .order
+        .as_ref()
+        .and_then(|o| o.order_lines.as_deref())
+        .unwrap_or(&[])
+        .iter()
+        .map(|l| {
+            (
+                l.mouser_part_number.clone().unwrap_or_default(),
+                l.quantity.unwrap_or(0),
+            )
+        })
+        .collect();
+    ExpectedOrder {
+        currency_code: currency.into(),
+        order_total: total,
+        lines,
+    }
+}
+
+/// A fresh preview of the order `p` would place, checked against the total the caller passed
+/// and the ceiling, before the user is asked; with what the submission must match.
+pub async fn verified_preview(
+    c: &Client,
+    p: &SubmitOrderParams,
+) -> Result<(OrderRoot, ExpectedOrder)> {
+    let preview = c.preview_order(&root(&p.order.request())).await?;
+    let expected = expected_from(&preview, &p.order.currency_code, p.total);
+    c.verify_order(&preview, &expected)?;
+    Ok((preview, expected))
 }
 
 pub async fn verified_preview_from_order(
     c: &Client,
     p: &SubmitFromOrderParams,
-) -> Result<OrderRoot> {
+) -> Result<(OrderRoot, ExpectedOrder)> {
     let preview = c
         .preview_order_from_order(
             p.order_number,
@@ -633,12 +660,19 @@ pub async fn verified_preview_from_order(
             p.currency_code.as_deref(),
         )
         .await?;
-    c.verify_order(&preview, &p.expected)?;
-    Ok(preview)
+    let expected = expected_from(&preview, &p.order.currency_code, p.total);
+    c.verify_order(&preview, &expected)?;
+    Ok((preview, expected))
 }
 
-pub async fn submit_order(c: &Client, p: &SubmitOrderParams) -> Result<Value> {
-    to_value(c.submit_order(&root(&p.order), &p.expected).await?)
+/// Places the order; Mouser's fresh preview must still match `expected` (the lines the user
+/// confirmed, the total, the ceiling).
+pub async fn submit_order(
+    c: &Client,
+    p: &SubmitOrderParams,
+    expected: &ExpectedOrder,
+) -> Result<Value> {
+    to_value(c.submit_order(&root(&p.order.request()), expected).await?)
 }
 
 pub async fn preview_order_from_order(c: &Client, p: &FromOrderParams) -> Result<Value> {
@@ -653,14 +687,18 @@ pub async fn preview_order_from_order(c: &Client, p: &FromOrderParams) -> Result
     )
 }
 
-pub async fn submit_order_from_order(c: &Client, p: &SubmitFromOrderParams) -> Result<Value> {
+pub async fn submit_order_from_order(
+    c: &Client,
+    p: &SubmitFromOrderParams,
+    expected: &ExpectedOrder,
+) -> Result<Value> {
     to_value(
         c.submit_order_from_order(
             p.order_number,
             &root(&p.order),
             p.country_code.as_deref(),
             p.currency_code.as_deref(),
-            &p.expected,
+            expected,
         )
         .await?,
     )
