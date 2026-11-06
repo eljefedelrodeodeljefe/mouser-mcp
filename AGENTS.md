@@ -81,8 +81,11 @@ Ordering spends real money. These rules have no exceptions:
 ## Gates
 
 All commits must pass `prek run --all-files`: `cargo fmt`, `cargo clippy --all-targets -- -D
-warnings` (**no `#[allow]` escapes**; fix the lint), `cargo test --all`, `typos`, TOML/YAML
-validation, markdownlint.
+warnings`, `cargo test --all`, `typos`, TOML/YAML validation, markdownlint.
+
+Fix the lint where you can. Where a lint is wrong for one site, put `#[expect(clippy::lint,
+reason = "…")]` on that site; a bare `#[allow]` is still refused. A lint allowed across the
+workspace goes in `[workspace.lints]`, with a comment giving the reason.
 
 ## Runtime
 
