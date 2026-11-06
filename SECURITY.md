@@ -8,7 +8,8 @@ not in a public issue. You will get an answer within a week.
 
 Especially relevant here: anything that could expose a Mouser API key (logs, error messages,
 replies), or place or change an order without the checks described in the README (the
-`MOUSER_ALLOW_ORDERS` gate, the `MOUSER_MAX_ORDER_TOTAL` ceiling, the fresh-preview match).
+`MOUSER_ALLOW_ORDERS` gate, the `MOUSER_MAX_ORDER_TOTAL` ceiling, the fresh-preview match, the
+user's confirmation in the form).
 
 ## Supported versions
 
