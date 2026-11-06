@@ -825,7 +825,7 @@ dependencies = [
 
 [[package]]
 name = "mouser"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -842,7 +842,7 @@ dependencies = [
 
 [[package]]
 name = "mouser-mcp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "mouser",
