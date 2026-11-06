@@ -82,7 +82,13 @@ def main() -> int:
             if "enum" in p:
                 desc = (desc + " " if desc else "") + "One of: " + ", ".join(p["enum"]) + "."
             out += doc(desc, "    ")
-            out.append(f'    #[serde(rename = "{field}"' + ("" if field in required else ", default, skip_serializing_if = \"Option::is_none\"") + ")]")
+            attrs = f'rename = "{field}"'
+            if field not in required:
+                attrs += ', default, skip_serializing_if = "Option::is_none"'
+                # Swagger documents enums as strings; the API sends their numbers.
+                if "enum" in p and ty == "String":
+                    attrs += ', deserialize_with = "crate::lenient::enum_text"'
+            out.append(f"    #[serde({attrs})]")
             out.append(f"    pub {snake(field)}: {ty if field in required else f'Option<{ty}>'},")
         if not req:
             out.append("    /// Fields Mouser sent that the Swagger documents do not describe.")
