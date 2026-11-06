@@ -20,8 +20,7 @@ on:
         type: string
         required: true
 
-permissions:
-  contents: write
+permissions: {}
 
 # Never cancel — interrupting mid-upload leaves a half-published release.
 concurrency:
@@ -35,6 +34,8 @@ jobs:
     if: "!github.event.release.prerelease"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -48,27 +49,35 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           ref: ${{ inputs.tag || github.event.release.tag_name }}
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-      - run: cargo build --release --locked --target ${{ matrix.target }}
+      # No build cache in a release: a poisoned cache entry would end up in a published binary.
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
+      # Values go through env, never into the script text (template injection).
       - name: Package
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          TARGET: ${{ matrix.target }}
         run: |
           mkdir -p dist
-          staging="mouser-mcp-${{ inputs.tag || github.event.release.tag_name }}-${{ matrix.target }}"
+          staging="mouser-mcp-${TAG}-${TARGET}"
           mkdir -p "$staging"
-          cp target/${{ matrix.target }}/release/mouser-mcp LICENSE README.md "$staging/"
+          cp "target/${TARGET}/release/mouser-mcp" LICENSE README.md "$staging/"
           tar -czf "dist/$staging.tar.gz" "$staging"
       - name: Upload to release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ inputs.tag || github.event.release.tag_name }}" dist/*.tar.gz --clobber
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/*.tar.gz --clobber
 
   # SBOM for the released version, attached to the release as a durable asset.
   # Informational: a finding must never block a release that has already been published —
