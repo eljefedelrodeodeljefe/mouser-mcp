@@ -613,6 +613,30 @@ pub async fn preview_order(c: &Client, p: &OrderParams) -> Result<Value> {
     to_value(c.preview_order(&root(&p.order)).await?)
 }
 
+/// A fresh preview of the order `p` would place, checked against what the caller confirmed
+/// and the ceiling, before the user is asked.
+pub async fn verified_preview(c: &Client, p: &SubmitOrderParams) -> Result<OrderRoot> {
+    let preview = c.preview_order(&root(&p.order)).await?;
+    c.verify_order(&preview, &p.expected)?;
+    Ok(preview)
+}
+
+pub async fn verified_preview_from_order(
+    c: &Client,
+    p: &SubmitFromOrderParams,
+) -> Result<OrderRoot> {
+    let preview = c
+        .preview_order_from_order(
+            p.order_number,
+            &root(&p.order),
+            p.country_code.as_deref(),
+            p.currency_code.as_deref(),
+        )
+        .await?;
+    c.verify_order(&preview, &p.expected)?;
+    Ok(preview)
+}
+
 pub async fn submit_order(c: &Client, p: &SubmitOrderParams) -> Result<Value> {
     to_value(c.submit_order(&root(&p.order), &p.expected).await?)
 }

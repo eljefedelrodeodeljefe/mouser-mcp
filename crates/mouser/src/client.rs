@@ -803,7 +803,7 @@ impl Client {
         expected: &ExpectedOrder,
     ) -> Result<OrderRoot> {
         let preview = self.preview_order(r).await?;
-        self.check_order(&preview, expected)?;
+        self.verify_order(&preview, expected)?;
         let body = with_submit(r, true)?;
         tracing::warn!(currency = %expected.currency_code, total = expected.order_total, "submitting a Mouser order");
         self.call(
@@ -850,7 +850,7 @@ impl Client {
         let preview = self
             .preview_order_from_order(order_number, r, country, currency)
             .await?;
-        self.check_order(&preview, expected)?;
+        self.verify_order(&preview, expected)?;
         let body = with_submit(r, true)?;
         let q = from_order_query(order_number, country, currency);
         tracing::warn!(
@@ -887,7 +887,10 @@ impl Client {
         .await
     }
 
-    fn check_order(&self, preview: &OrderRoot, expected: &ExpectedOrder) -> Result<()> {
+    /// The checks [`Self::submit_order`] runs on its fresh preview: a ceiling is configured,
+    /// and currency, total and every line match `expected`, the total within the ceiling.
+    /// Public so a caller can run them on a preview before asking a user to confirm it.
+    pub fn verify_order(&self, preview: &OrderRoot, expected: &ExpectedOrder) -> Result<()> {
         let max = self.cfg.max_order_total.ok_or_else(|| {
             Error::OrderMismatch("no order ceiling configured (MOUSER_MAX_ORDER_TOTAL)".into())
         })?;

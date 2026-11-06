@@ -2,6 +2,7 @@ use anyhow::Result;
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 
+mod confirm;
 mod error;
 mod params;
 mod server;

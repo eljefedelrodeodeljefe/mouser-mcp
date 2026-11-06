@@ -44,9 +44,18 @@ so they are gated separately, and an order is never a side effect:
    (in the order's currency). Without a ceiling no order is placed. The check is in the
    library, below the MCP layer.
 3. `preview_order` always sends `SubmitOrder: false`, whatever the request says. Only
-   `submit_order` sends `true`, and only after a **fresh preview** matches what the user
+   `submit_order` sends `true`, and only after a **fresh preview** matches what the caller
    confirmed: currency, total and every line. If the price moved since the preview, nothing is
    placed and the caller gets an *invalid params* error explaining what changed.
+4. **The user confirms in a form, not the model.** Before placing it, the server asks the
+   person at the MCP client through [elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation):
+   a form with the amount, the lines, shipping, tax, ship-to address and payment, and a
+   "Place this order" box. Only an accepted form with the box ticked places the order; decline,
+   cancel or no answer places nothing. A client that cannot show forms cannot order. On
+   protocol `2026-07-28` the form travels as an `InputRequiredResult` (multi round-trip); the
+   pending confirmation stays on the server, is single use, expires after ten minutes and is
+   bound to the exact arguments of the call, so an answer cannot be replayed onto another
+   order.
 
 Keys travel in Mouser's query string, so the client never logs URLs, strips them from
 transport errors, scrubs the key from any reply that echoes it, and redacts `ApiKey` in
