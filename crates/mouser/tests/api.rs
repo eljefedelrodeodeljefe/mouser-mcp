@@ -491,3 +491,94 @@ async fn a_submission_that_times_out_may_have_placed_the_order() {
         .unwrap_err();
     assert!(matches!(e, Error::Transport(_)), "{e:?}");
 }
+
+/// What this thread logs. One global subscriber writes each thread's events to that thread's
+/// buffer: a subscriber set per test would race with the tests running beside it (tracing
+/// caches per call site whether anyone listens).
+#[derive(Clone, Copy)]
+struct Logs;
+
+thread_local! {
+    static LOGGED: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+impl std::io::Write for Logs {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        LOGGED.with(|l| l.borrow_mut().extend_from_slice(b));
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Logs {
+    /// Starts collecting this thread's log afresh.
+    fn capture() -> Self {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            tracing::subscriber::set_global_default(
+                tracing_subscriber::fmt()
+                    .with_ansi(false)
+                    .with_max_level(tracing::Level::INFO)
+                    .with_writer(|| Logs)
+                    .finish(),
+            )
+            .expect("the only subscriber of this test binary");
+            tracing::callsite::rebuild_interest_cache();
+        });
+        LOGGED.with(|l| l.borrow_mut().clear());
+        Logs
+    }
+
+    fn text(self) -> String {
+        LOGGED.with(|l| String::from_utf8_lossy(&l.borrow()).into_owned())
+    }
+}
+
+#[tokio::test]
+async fn placed_and_refused_orders_leave_an_audit_line() {
+    let logs = Logs::capture();
+
+    let server = MockServer::start().await;
+    let mut placed = order_reply(200.0, 2);
+    placed["Order"]["OrderID"] = json!("placed-1");
+    placed["Order"]["ShippingAddress"] = json!({"AddressOne": "Secret Street 1", "City": "Berlin"});
+    mount_order(&server, false, order_reply(200.0, 2), 1).await;
+    mount_order(&server, true, placed, 1).await;
+    client(&server, Some(500.0))
+        .submit_order(&order_request(), &expected(200.0))
+        .await
+        .unwrap();
+    let text = logs.text();
+    let line = text
+        .lines()
+        .find(|l| l.contains("Mouser order placed"))
+        .unwrap_or_else(|| panic!("no audit line in {text}"));
+    for want in [
+        "INFO",
+        "order_id=\"placed-1\"",
+        "total=200",
+        "currency=\"EUR\"",
+    ] {
+        assert!(line.contains(want), "{want} missing in {line}");
+    }
+    assert!(
+        !text.contains("Secret Street") && !text.contains(ORDER_KEY),
+        "{text}"
+    );
+
+    let server = MockServer::start().await;
+    mount_order(&server, false, order_reply(210.0, 2), 1).await;
+    client(&server, Some(500.0))
+        .submit_order(&order_request(), &expected(200.0))
+        .await
+        .unwrap_err();
+    let text = logs.text();
+    assert!(
+        text.lines().any(|l| l.contains("WARN")
+            && l.contains("order refused")
+            && l.contains("total is 210")),
+        "{text}"
+    );
+}

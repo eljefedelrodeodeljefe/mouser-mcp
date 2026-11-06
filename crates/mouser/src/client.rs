@@ -806,15 +806,18 @@ impl Client {
         self.verify_order(&preview, expected)?;
         let body = with_submit(r, true)?;
         tracing::warn!(currency = %expected.currency_code, total = expected.order_total, "submitting a Mouser order");
-        self.call(
-            reqwest::Method::POST,
-            "/v1/order",
-            KeyKind::Order,
-            vec![],
-            Some(&body),
-        )
-        .await
-        .map_err(outcome_unknown)
+        let placed = self
+            .call(
+                reqwest::Method::POST,
+                "/v1/order",
+                KeyKind::Order,
+                vec![],
+                Some(&body),
+            )
+            .await
+            .map_err(outcome_unknown)?;
+        log_placed(&placed, expected, None);
+        Ok(placed)
     }
 
     /// `POST /api/v1/order/CreateFromOrder` with `SubmitOrder` false: summary of re-ordering
@@ -859,15 +862,18 @@ impl Client {
             total = expected.order_total,
             "submitting a Mouser re-order"
         );
-        self.call(
-            reqwest::Method::POST,
-            "/v1/order/CreateFromOrder",
-            KeyKind::Order,
-            q,
-            Some(&body),
-        )
-        .await
-        .map_err(outcome_unknown)
+        let placed = self
+            .call(
+                reqwest::Method::POST,
+                "/v1/order/CreateFromOrder",
+                KeyKind::Order,
+                q,
+                Some(&body),
+            )
+            .await
+            .map_err(outcome_unknown)?;
+        log_placed(&placed, expected, Some(order_number));
+        Ok(placed)
     }
 
     /// `POST /api/v1/order/item/CreateCartFromOrder` — a new cart holding an earlier order's
@@ -893,6 +899,14 @@ impl Client {
     /// and currency, total and every line match `expected`, the total within the ceiling.
     /// Public so a caller can run them on a preview before asking a user to confirm it.
     pub fn verify_order(&self, preview: &OrderRoot, expected: &ExpectedOrder) -> Result<()> {
+        let r = self.check_order(preview, expected);
+        if let Err(e) = &r {
+            tracing::warn!(reason = %e, "order refused");
+        }
+        r
+    }
+
+    fn check_order(&self, preview: &OrderRoot, expected: &ExpectedOrder) -> Result<()> {
         let max = self.cfg.max_order_total.ok_or_else(|| {
             Error::OrderMismatch("no order ceiling configured (MOUSER_MAX_ORDER_TOTAL)".into())
         })?;
@@ -943,6 +957,23 @@ impl Client {
         }
         Ok(())
     }
+}
+
+/// The audit line of a placed order: its id, total and currency (Mouser's reply, else what
+/// was confirmed). Never the address, the payment details or the request.
+fn log_placed(placed: &OrderRoot, expected: &ExpectedOrder, reorder_of: Option<i64>) {
+    let o = placed.order.as_ref();
+    tracing::info!(
+        order_id = o.and_then(|o| o.order_id.as_deref()).unwrap_or("?"),
+        total = o
+            .and_then(|o| o.order_total)
+            .unwrap_or(expected.order_total),
+        currency = o
+            .and_then(|o| o.currency_code.as_deref())
+            .unwrap_or(&expected.currency_code),
+        reorder_of,
+        "Mouser order placed"
+    );
 }
 
 /// A transport failure of the call that places an order: the request may have reached

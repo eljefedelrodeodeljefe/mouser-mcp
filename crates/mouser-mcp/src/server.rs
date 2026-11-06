@@ -76,6 +76,12 @@ fn refused(why: impl std::fmt::Display) -> ErrorData {
     )
 }
 
+/// An order the user's answer did not confirm, logged as such.
+fn user_refused(tool: &str, why: impl std::fmt::Display) -> ErrorData {
+    tracing::info!(tool, reason = %why, "order refused at confirmation");
+    refused(why)
+}
+
 /// `NAME` or the first line of the file `NAME_FILE` (preferred: keeps the key out of
 /// process listings and of the MCP client's JSON config).
 fn key_from_env(name: &str) -> anyhow::Result<Option<ApiKey>> {
@@ -211,11 +217,14 @@ impl MouserServer {
                 ));
             };
             // What the user was shown, not what this round's preview says.
-            let confirmed = self.confirmations.take(&id, tool, &args).map_err(refused)?;
+            let confirmed = self
+                .confirmations
+                .take(&id, tool, &args)
+                .map_err(|why| user_refused(tool, why))?;
             let response = responses.as_ref().and_then(|r| r.get(confirm::INPUT_KEY));
             return match confirm::answer(response, &confirmed.keys) {
                 Answer::Confirmed => Ok(Gate::Go(confirmed.expected)),
-                Answer::Refused(why) => Err(refused(why)),
+                Answer::Refused(why) => Err(user_refused(tool, why)),
             };
         }
         let result = ctx
@@ -227,7 +236,7 @@ impl MouserServer {
             .map_err(|e| refused(format!("the confirmation failed: {e}")))?;
         match confirm::answer(Some(&response), &form.keys) {
             Answer::Confirmed => Ok(Gate::Go(expected)),
-            Answer::Refused(why) => Err(refused(why)),
+            Answer::Refused(why) => Err(user_refused(tool, why)),
         }
     }
 
@@ -706,6 +715,50 @@ mod tests {
     use wiremock::matchers::{body_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    /// What this thread logs. One global subscriber writes each thread's events to that thread's
+    /// buffer: a subscriber set per test would race with the tests running beside it (tracing
+    /// caches per call site whether anyone listens).
+    #[derive(Clone, Copy)]
+    struct Logs;
+
+    thread_local! {
+        static LOGGED: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    impl std::io::Write for Logs {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            LOGGED.with(|l| l.borrow_mut().extend_from_slice(b));
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Logs {
+        /// Starts collecting this thread's log afresh.
+        fn capture() -> Self {
+            static INIT: std::sync::Once = std::sync::Once::new();
+            INIT.call_once(|| {
+                tracing::subscriber::set_global_default(
+                    tracing_subscriber::fmt()
+                        .with_ansi(false)
+                        .with_max_level(tracing::Level::INFO)
+                        .with_writer(|| Logs)
+                        .finish(),
+                )
+                .expect("the only subscriber of this test binary");
+                tracing::callsite::rebuild_interest_cache();
+            });
+            LOGGED.with(|l| l.borrow_mut().clear());
+            Logs
+        }
+
+        fn text(self) -> String {
+            LOGGED.with(|l| String::from_utf8_lossy(&l.borrow()).into_owned())
+        }
+    }
+
     /// How the test user answers the form.
     #[derive(Clone, Debug)]
     struct Reply {
@@ -958,6 +1011,7 @@ mod tests {
                 }),
                 None, // a client that cannot show the form
             ] {
+                let logs = Logs::capture();
                 let mouser = MockServer::start().await;
                 mount_order(&mouser, true, 0).await;
                 mount_order(&mouser, false, 0..).await;
@@ -966,6 +1020,11 @@ mod tests {
                 assert!(
                     e.contains("nothing was ordered"),
                     "{protocol:?} {answer:?}: {e}"
+                );
+                let text = logs.text();
+                assert!(
+                    text.contains("order refused"),
+                    "{protocol:?} {answer:?}: no refusal logged in {text:?}"
                 );
             }
         }
