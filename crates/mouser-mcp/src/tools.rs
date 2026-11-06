@@ -369,15 +369,130 @@ pub async fn update_cart(c: &Client, p: &CartItemsParams) -> Result<Value> {
     )
 }
 
+/// Adds to a cart without losing what is already in it.
+///
+/// Mouser's AddCartItems (`cart/items/insert`) has been seen replacing a cart's contents
+/// instead of adding to them. With a cart key, the cart is read, the new items are merged in
+/// (quantities of a part already in the cart add up), the whole cart is written with
+/// UpdateCart, and the result is read back and checked line by line. Without a cart key, the
+/// insert creates a new cart, which has nothing to lose.
 pub async fn add_cart_items(c: &Client, p: &CartItemsParams) -> Result<Value> {
-    to_value(
-        c.add_cart_items(
-            &cart_request(p),
-            p.country_code.as_deref(),
-            p.currency_code.as_deref(),
-        )
-        .await?,
+    let (country, currency) = (p.country_code.as_deref(), p.currency_code.as_deref());
+    let Some(key) = p.cart_key.as_deref() else {
+        return to_value(
+            c.add_cart_items(&cart_request(p), country, currency)
+                .await?,
+        );
+    };
+    let before = c.get_cart(key, country, currency).await?;
+    let merged = merge_cart(&before, &p.items);
+    c.update_cart(
+        &CartItemRequestRoot {
+            cart_key: Some(key.into()),
+            mouser_pays_customs_and_duties: p.mouser_pays_customs_and_duties,
+            cart_items: Some(merged.clone()),
+        },
+        country,
+        currency,
     )
+    .await?;
+    let after = c.get_cart(key, country, currency).await?;
+    check_cart(&after, &merged)?;
+    to_value(after)
+}
+
+fn same_part(a: &str, b: &str) -> bool {
+    a.trim().eq_ignore_ascii_case(b.trim())
+}
+
+/// The cart's lines plus `items`; a part already in the cart gets the quantities added and
+/// keeps its line reference unless the new item brings one.
+fn merge_cart(cart: &CartResponseRoot, items: &[CartItem]) -> Vec<CartItemRequest> {
+    let mut out: Vec<CartItemRequest> = cart
+        .cart_items
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|l| {
+            Some(CartItemRequest {
+                mouser_part_number: l.mouser_part_number.clone()?,
+                quantity: l.quantity.unwrap_or(0),
+                customer_part_number: l
+                    .cart_item_cust_part_number
+                    .clone()
+                    .filter(|s| !s.is_empty()),
+                // Mouser reports "None" for parts without a packaging choice
+                packaging_choice: l
+                    .packaging_choice
+                    .clone()
+                    .filter(|s| !s.is_empty() && s != "None"),
+            })
+        })
+        .collect();
+    for i in items {
+        match out
+            .iter_mut()
+            .find(|o| same_part(&o.mouser_part_number, &i.mouser_part_number))
+        {
+            Some(o) => {
+                o.quantity += i.quantity;
+                if i.customer_part_number.is_some() {
+                    o.customer_part_number.clone_from(&i.customer_part_number);
+                }
+                if i.packaging_choice.is_some() {
+                    o.packaging_choice.clone_from(&i.packaging_choice);
+                }
+            }
+            None => out.push(CartItemRequest {
+                mouser_part_number: i.mouser_part_number.clone(),
+                quantity: i.quantity,
+                customer_part_number: i.customer_part_number.clone(),
+                packaging_choice: i.packaging_choice.clone(),
+            }),
+        }
+    }
+    out
+}
+
+/// Every line written is in the cart with its quantity, and nothing else is.
+fn check_cart(cart: &CartResponseRoot, want: &[CartItemRequest]) -> Result<()> {
+    let got: Vec<(String, i64)> = cart
+        .cart_items
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|l| {
+            (
+                l.mouser_part_number.clone().unwrap_or_default(),
+                l.quantity.unwrap_or(0),
+            )
+        })
+        .collect();
+    let mut problems = vec![];
+    for w in want {
+        match got
+            .iter()
+            .find(|(n, _)| same_part(n, &w.mouser_part_number))
+        {
+            None => problems.push(format!("{} is missing", w.mouser_part_number)),
+            Some((_, q)) if *q != w.quantity => problems.push(format!(
+                "{} has quantity {q}, expected {}",
+                w.mouser_part_number, w.quantity
+            )),
+            Some(_) => {}
+        }
+    }
+    for (n, _) in &got {
+        if !want.iter().any(|w| same_part(n, &w.mouser_part_number)) {
+            problems.push(format!("{n} is in the cart but was not written"));
+        }
+    }
+    anyhow::ensure!(
+        problems.is_empty(),
+        "the cart does not hold what was written: {}",
+        problems.join("; ")
+    );
+    Ok(())
 }
 
 pub async fn update_cart_items(c: &Client, p: &CartItemsParams) -> Result<Value> {
@@ -540,6 +655,113 @@ pub async fn create_cart_from_order(c: &Client, p: &CartFromOrderParams) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn order_client(server: &wiremock::MockServer) -> Client {
+        Client::new(mouser::Config {
+            base_url: format!("{}/api", server.uri()),
+            order_key: Some(mouser::ApiKey::new("test-order-key-0000").unwrap()),
+            max_calls_per_minute: 0,
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    fn cart(lines: Value) -> Value {
+        json!({"Errors": [], "CartKey": "cart-1", "CurrencyCode": "EUR", "CartItems": lines})
+    }
+
+    /// GET /v1/cart answers `first` once, then `then`.
+    async fn mount_carts(server: &wiremock::MockServer, first: Value, then: Value) {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, ResponseTemplate};
+        Mock::given(method("GET"))
+            .and(path("/api/v1/cart"))
+            .and(query_param("cartKey", "cart-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(first))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/cart"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(then))
+            .with_priority(2)
+            .mount(server)
+            .await;
+    }
+
+    fn add(items: Vec<(&str, i64, Option<&str>)>) -> CartItemsParams {
+        CartItemsParams {
+            cart_key: Some("cart-1".into()),
+            items: items
+                .into_iter()
+                .map(|(n, q, r)| CartItem {
+                    mouser_part_number: n.into(),
+                    quantity: q,
+                    customer_part_number: r.map(Into::into),
+                    packaging_choice: None,
+                })
+                .collect(),
+            mouser_pays_customs_and_duties: None,
+            country_code: None,
+            currency_code: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn adding_to_a_cart_keeps_its_lines_and_checks_the_result() {
+        use wiremock::matchers::{body_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        let splitter = json!({"MouserPartNumber": "139-ZX10R-2-183-S+", "Quantity": 2,
+            "CartItemCustPartNumber": "splitter", "PackagingChoice": "None"});
+        let both = json!([splitter, {"MouserPartNumber": "67-ST0645", "Quantity": 3}]);
+        mount_carts(&server, cart(json!([splitter])), cart(both.clone())).await;
+        // the whole cart is written: the line already there, plus the new one
+        Mock::given(method("POST"))
+            .and(path("/api/v1/cart"))
+            .and(body_json(json!({"CartKey": "cart-1", "CartItems": [
+                {"MouserPartNumber": "139-ZX10R-2-183-S+", "Quantity": 2, "CustomerPartNumber": "splitter"},
+                {"MouserPartNumber": "67-ST0645", "Quantity": 3}]})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(cart(both)))
+            .expect(1)
+            .mount(&server)
+            .await;
+        // the insert endpoint, which has dropped lines, is not used for an existing cart
+        Mock::given(method("POST"))
+            .and(path("/api/v1/cart/items/insert"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let r = add_cart_items(
+            &order_client(&server),
+            &add(vec![("67-ST0645", 1, None), ("67-st0645", 2, None)]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["CartItems"].as_array().unwrap().len(), 2, "{r:#}");
+    }
+
+    #[tokio::test]
+    async fn a_cart_that_lost_a_line_is_an_error_not_a_success() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        let splitter = json!({"MouserPartNumber": "139-ZX10R-2-183-S+", "Quantity": 2});
+        let only_new = cart(json!([{"MouserPartNumber": "67-ST0645", "Quantity": 2}]));
+        mount_carts(&server, cart(json!([splitter])), only_new.clone()).await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/cart"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(only_new))
+            .mount(&server)
+            .await;
+        let e = add_cart_items(&order_client(&server), &add(vec![("67-ST0645", 2, None)]))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("139-ZX10R-2-183-S+ is missing"), "{e}");
+    }
 
     #[test]
     fn prices_are_read_with_the_currency_s_own_separators_or_not_at_all() {
