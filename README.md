@@ -71,6 +71,10 @@ own gate, and every order needs the person's confirmation:
 An order takes four steps: `query_order_options` (shipping and payment codes),
 `preview_order` (`cart_key`, `currency_code`, `shipping_code`, `payment_method`),
 `submit_order` (the same, plus the preview's `total`), and the user's answer in the form.
+A re-order of an earlier order takes the same arguments plus its `order_number`
+(`preview_order_from_order`, `submit_order_from_order`). Neither takes an address or freight
+accounts: those come from the Mouser account, so the model cannot send an order somewhere the
+form does not show.
 
 Keys travel in Mouser's query string, so the client never logs URLs, strips them from
 transport errors, scrubs the key from any reply that echoes it, and redacts `ApiKey` in

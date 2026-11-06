@@ -655,9 +655,9 @@ pub async fn verified_preview_from_order(
     let preview = c
         .preview_order_from_order(
             p.order_number,
-            &root(&p.order),
-            p.country_code.as_deref(),
-            p.currency_code.as_deref(),
+            &root(&p.order.request()),
+            None,
+            Some(&p.order.currency_code),
         )
         .await?;
     let expected = expected_from(&preview, &p.order.currency_code, p.total);
@@ -679,9 +679,9 @@ pub async fn preview_order_from_order(c: &Client, p: &FromOrderParams) -> Result
     to_value(
         c.preview_order_from_order(
             p.order_number,
-            &root(&p.order),
-            p.country_code.as_deref(),
-            p.currency_code.as_deref(),
+            &root(&p.order.request()),
+            None,
+            Some(&p.order.currency_code),
         )
         .await?,
     )
@@ -695,9 +695,9 @@ pub async fn submit_order_from_order(
     to_value(
         c.submit_order_from_order(
             p.order_number,
-            &root(&p.order),
-            p.country_code.as_deref(),
-            p.currency_code.as_deref(),
+            &root(&p.order.request()),
+            None,
+            Some(&p.order.currency_code),
             expected,
         )
         .await?,

@@ -575,7 +575,7 @@ impl MouserServer {
     }
 
     #[tool(
-        description = "Preview re-ordering an earlier order (POST /api/v1/order/CreateFromOrder with SubmitOrder false — never places an order)"
+        description = "Preview re-ordering an earlier order (POST /api/v1/order/CreateFromOrder with SubmitOrder false — never places an order). Takes order_number and the same cart_key, currency_code, shipping_code and payment_method as preview_order; ship-to and the rest come from the Mouser account"
     )]
     async fn preview_order_from_order(
         &self,
@@ -585,7 +585,7 @@ impl MouserServer {
     }
 
     #[tool(
-        description = "PLACE A RE-ORDER of an earlier order — a real purchase (POST /api/v1/order/CreateFromOrder with SubmitOrder true). Takes `total`, the OrderTotal of preview_order_from_order; the same confirmation form as submit_order. Requires MOUSER_ALLOW_ORDERS"
+        description = "PLACE A RE-ORDER of an earlier order — a real purchase (POST /api/v1/order/CreateFromOrder with SubmitOrder true). Same arguments as preview_order_from_order plus `total`, its OrderTotal; the same confirmation form as submit_order. Requires MOUSER_ALLOW_ORDERS"
     )]
     async fn submit_order_from_order(
         &self,
@@ -1067,5 +1067,58 @@ mod tests {
             e.contains("get_order") && e.contains("order_history"),
             "{e}"
         );
+    }
+
+    async fn mount_reorder(server: &MockServer, submit: bool, times: impl Into<wiremock::Times>) {
+        use wiremock::matchers::query_param;
+        let reply = json!({"Order": {"Errors": [], "CurrencyCode": "EUR", "OrderTotal": 200.0,
+            "SubmitOrder": submit, "OrderID": "placed-2",
+            "OrderLines": [{"MouserPartNumber": "139-ZFRSC-42-S+", "Quantity": 2, "UnitPrice": 87.1, "ExtendedPrice": 174.2}]}});
+        // Exactly this body: nothing the model sent beyond the choices reaches Mouser.
+        Mock::given(method("POST"))
+            .and(path("/api/v1/order/CreateFromOrder"))
+            .and(query_param("orderNumber", "42"))
+            .and(query_param("currencyCode", "EUR"))
+            .and(body_json(json!({"Order": {"CartKey": "cart-1", "CurrencyCode": "EUR",
+                "PrimaryShipping": {"Code": 7}, "Payment": {"Method": 1081}, "SubmitOrder": submit}})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(reply))
+            .expect(times)
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_re_order_ships_where_the_account_says_not_where_the_model_says() {
+        let mouser = MockServer::start().await;
+        mount_reorder(&mouser, false, 1..).await;
+        mount_reorder(&mouser, true, 1).await;
+        let hijack = json!({"CartKey": "cart-1", "CurrencyCode": "EUR",
+            "PrimaryShipping": {"Code": 7}, "Payment": {"Method": 1081},
+            "ShippingAddress": {"FirstName": "Robert", "LastName": "L", "AddressOne": "Elsewhere 1",
+                "City": "Berlin", "CountryCode": "DE", "PhoneNumber": "0"},
+            "PrimaryFreightAccount": {"Number": "x"}, "IECCode": "x"});
+        let args = json!({"order_number": 42, "cart_key": "cart-1", "currency_code": "EUR",
+            "shipping_code": 7, "payment_method": 1081, "total": 200.0, "order": hijack});
+        let (r, shown) = call_through_mcp(
+            &mouser,
+            ProtocolVersion::V_2025_06_18,
+            Some(yes()),
+            "submit_order_from_order",
+            args,
+            |_| {},
+        )
+        .await;
+        assert!(r.as_ref().unwrap().contains("placed-2"), "{r:?}");
+        assert_eq!(shown.len(), 1);
+
+        let server = MouserServer::new(cfg(false, true), false, true).unwrap();
+        for tool in ["submit_order_from_order", "preview_order_from_order"] {
+            let schema =
+                serde_json::to_string(&server.tool_router.get(tool).expect("listed").input_schema)
+                    .unwrap();
+            for field in ["ShippingAddress", "FreightAccount", "IECCode"] {
+                assert!(!schema.contains(field), "{tool} takes {field}: {schema}");
+            }
+        }
     }
 }
