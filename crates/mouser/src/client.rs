@@ -317,6 +317,7 @@ impl Client {
         query.push(("apiKey", k.expose().to_string()));
         self.limiter.acquire().await;
         tracing::debug!(%method, path, "Mouser API call");
+        let bodiless_write = body.is_none() && method != reqwest::Method::GET;
         let mut req = self
             .http
             .request(
@@ -327,6 +328,12 @@ impl Client {
             .header("Accept", "application/json");
         if let Some(b) = body {
             req = req.json(b);
+        } else if bodiless_write {
+            // Mouser's CDN answers a POST without a body with 411 Length Required, and hyper
+            // leaves the header off an empty body: state the length.
+            req = req
+                .header(reqwest::header::CONTENT_LENGTH, "0")
+                .body(Vec::<u8>::new());
         }
         let resp = req.send().await?;
         let status = resp.status();
