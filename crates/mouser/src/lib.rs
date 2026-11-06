@@ -8,7 +8,8 @@
 //! Placing an order is never a side effect. [`Client::preview_order`] always sends
 //! `SubmitOrder: false`; only [`Client::submit_order`] and [`Client::submit_order_from_order`]
 //! send `true`, and only after a fresh preview matches what the caller confirmed and stays
-//! under [`Config::max_order_total`] (no ceiling configured: no order).
+//! under [`Config::max_order_total`], an [`OrderCeiling`] in the order's currency (no ceiling
+//! configured: no order; an order in another currency: no order).
 
 mod client;
 mod error;
@@ -16,7 +17,7 @@ mod lenient;
 pub mod models;
 
 pub use client::{
-    ApiKey, Client, Config, DEFAULT_BASE_URL, DateFilter, ExpectedOrder, PartSearchOption,
-    SearchOption, join_part_numbers, mouser_date,
+    ApiKey, Client, Config, DEFAULT_BASE_URL, DateFilter, ExpectedOrder, OrderCeiling,
+    PartSearchOption, SearchOption, join_part_numbers, mouser_date,
 };
 pub use error::{Error, KeyKind, Result};

@@ -53,9 +53,11 @@ Ordering spends real money. These rules have no exceptions:
 - Only `Client::submit_order` and `Client::submit_order_from_order` may send
   `SubmitOrder: true`. Every other path forces `false`.
 - A submission previews again and goes ahead only if currency, total and every line match
-  what was confirmed, and the total is within `Config::max_order_total`. No ceiling
-  configured means no order. These checks live in the library, below the tool layer; do not
-  add a parameter that relaxes them.
+  what was confirmed, and the total is within `Config::max_order_total`, an `OrderCeiling`
+  (`"500 EUR"`). No ceiling configured means no order, and so does an order in a currency
+  other than the ceiling's: the caller picks the currency, so a bare amount bounds nothing.
+  The ceiling is compared as a `Decimal`. These checks live in the library, below the tool
+  layer; do not add a parameter that relaxes them.
 - After those checks and before submitting, the user confirms the order in an MCP
   elicitation form (`crates/mouser-mcp/src/confirm.rs`). Only an accepted form with every
   line still selected and `place_order: true` goes ahead, and the lines a submission must

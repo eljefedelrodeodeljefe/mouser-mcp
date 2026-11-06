@@ -1,6 +1,6 @@
 use anyhow::Context;
 use mouser::models::OrderRoot;
-use mouser::{ApiKey, Client, Config, ExpectedOrder, KeyKind};
+use mouser::{ApiKey, Client, Config, ExpectedOrder, KeyKind, OrderCeiling};
 use rmcp::{
     RoleServer, ServerHandler,
     handler::server::{
@@ -102,6 +102,19 @@ fn env_bool(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// `MOUSER_MAX_ORDER_TOTAL`: an amount and its currency, `"500 EUR"`. A bare amount is
+/// refused: the caller picks an order's currency, so a ceiling without one does not bound it.
+fn order_ceiling(v: Option<&str>) -> anyhow::Result<Option<OrderCeiling>> {
+    v.map(|v| {
+        v.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "MOUSER_MAX_ORDER_TOTAL: {e}. It takes the amount and the currency the ceiling is in, such as \"500 EUR\"; orders in any other currency are refused"
+            )
+        })
+    })
+    .transpose()
+}
+
 fn env_parse<T: std::str::FromStr>(name: &str) -> anyhow::Result<Option<T>> {
     match std::env::var(name) {
         Ok(v) => {
@@ -122,13 +135,8 @@ impl MouserServer {
                 "no Mouser API key: set MOUSER_SEARCH_API_KEY_FILE (or MOUSER_SEARCH_API_KEY) and/or MOUSER_ORDER_API_KEY_FILE"
             );
         }
-        let max_order_total: Option<f64> = env_parse("MOUSER_MAX_ORDER_TOTAL")?;
-        if let Some(m) = max_order_total {
-            anyhow::ensure!(
-                m.is_finite() && m > 0.0,
-                "MOUSER_MAX_ORDER_TOTAL must be a positive amount"
-            );
-        }
+        let max_order_total =
+            order_ceiling(std::env::var("MOUSER_MAX_ORDER_TOTAL").ok().as_deref())?;
         let cfg = Config {
             base_url: std::env::var("MOUSER_API_BASE")
                 .unwrap_or_else(|_| mouser::DEFAULT_BASE_URL.into()),
@@ -693,6 +701,18 @@ mod tests {
     }
 
     #[test]
+    fn the_ceiling_needs_its_currency() {
+        let c = order_ceiling(Some("500 EUR")).unwrap().unwrap();
+        assert_eq!(c.to_string(), "500 EUR");
+        assert!(order_ceiling(None).unwrap().is_none());
+        let e = order_ceiling(Some("500")).unwrap_err().to_string();
+        assert!(
+            e.starts_with("MOUSER_MAX_ORDER_TOTAL") && e.contains("\"500 EUR\""),
+            "{e}"
+        );
+    }
+
+    #[test]
     fn writes_and_orders_are_gated_separately() {
         let s = MouserServer::new(cfg(false, true), true, false).unwrap();
         assert!(s.guard_cart().is_ok());
@@ -879,7 +899,7 @@ mod tests {
             base_url: format!("{}/api", mouser.uri()),
             order_key: Some(ApiKey::new("test-order-key-00000").unwrap()),
             max_calls_per_minute: 0,
-            max_order_total: Some(500.0),
+            max_order_total: Some("500 EUR".parse().unwrap()),
             ..Config::default()
         };
         tweak(&mut cfg);

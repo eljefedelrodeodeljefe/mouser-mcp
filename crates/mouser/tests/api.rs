@@ -2,7 +2,7 @@
 //! documents define them, error mapping, key handling and the order safety checks.
 
 use mouser::models::*;
-use mouser::{ApiKey, Client, Config, DateFilter, Error, ExpectedOrder, KeyKind};
+use mouser::{ApiKey, Client, Config, DateFilter, Error, ExpectedOrder, KeyKind, OrderCeiling};
 use serde_json::{Value, json};
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -16,7 +16,7 @@ fn client(server: &MockServer, ceiling: Option<f64>) -> Client {
         search_key: Some(ApiKey::new(SEARCH_KEY).unwrap()),
         order_key: Some(ApiKey::new(ORDER_KEY).unwrap()),
         max_calls_per_minute: 0,
-        max_order_total: ceiling,
+        max_order_total: ceiling.map(|c| format!("{c} EUR").parse().unwrap()),
         ..Config::default()
     })
     .unwrap()
@@ -451,7 +451,7 @@ async fn a_submission_that_times_out_may_have_placed_the_order() {
         base_url: format!("{}/api", server.uri()),
         order_key: Some(ApiKey::new(ORDER_KEY).unwrap()),
         max_calls_per_minute: 0,
-        max_order_total: Some(500.0),
+        max_order_total: Some("500 EUR".parse().unwrap()),
         timeout: std::time::Duration::from_millis(500),
         ..Config::default()
     })
@@ -480,7 +480,7 @@ async fn a_submission_that_times_out_may_have_placed_the_order() {
         base_url: format!("{}/api", server.uri()),
         order_key: Some(ApiKey::new(ORDER_KEY).unwrap()),
         max_calls_per_minute: 0,
-        max_order_total: Some(500.0),
+        max_order_total: Some("500 EUR".parse().unwrap()),
         timeout: std::time::Duration::from_millis(500),
         ..Config::default()
     })
@@ -581,4 +581,88 @@ async fn placed_and_refused_orders_leave_an_audit_line() {
             && l.contains("total is 210")),
         "{text}"
     );
+}
+
+#[tokio::test]
+async fn the_ceiling_holds_only_in_its_own_currency() {
+    let gbp = |total: f64| {
+        json!({"Order": {"Errors": [], "CurrencyCode": "GBP", "OrderTotal": total,
+            "OrderLines": [{"MouserPartNumber": "139-ZFRSC-42-S+", "Quantity": 2}]}})
+    };
+    let mut request = order_request();
+    request.order.as_mut().unwrap().currency_code = "GBP".into();
+    let confirmed = |total: f64| ExpectedOrder {
+        currency_code: "GBP".into(),
+        ..expected(total)
+    };
+    let submit_mock = |reply: Value, times: u64| {
+        Mock::given(method("POST"))
+            .and(path("/api/v1/order"))
+            .and(body_json(
+                json!({"Order": {"CartKey": "cart-1", "CurrencyCode": "GBP", "SubmitOrder": true}}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(reply))
+            .expect(times)
+    };
+    let preview_mock = |reply: Value| {
+        Mock::given(method("POST"))
+            .and(path("/api/v1/order"))
+            .and(body_json(json!({"Order": {"CartKey": "cart-1", "CurrencyCode": "GBP", "SubmitOrder": false}})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(reply))
+    };
+    let with_ceiling = |server: &MockServer, ceiling: &str| {
+        Client::new(Config {
+            base_url: format!("{}/api", server.uri()),
+            order_key: Some(ApiKey::new(ORDER_KEY).unwrap()),
+            max_calls_per_minute: 0,
+            max_order_total: Some(ceiling.parse().unwrap()),
+            ..Config::default()
+        })
+        .unwrap()
+    };
+
+    // 500 meant as EUR: a 450 GBP order is not under it, whatever the number says
+    let server = MockServer::start().await;
+    preview_mock(gbp(450.0)).mount(&server).await;
+    submit_mock(gbp(450.0), 0).mount(&server).await;
+    let e = with_ceiling(&server, "500 EUR")
+        .submit_order(&request, &confirmed(450.0))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&e, Error::OrderMismatch(m) if m.contains("GBP") && m.contains("500 EUR")),
+        "{e:?}"
+    );
+
+    // in its own currency the ceiling is compared exactly: at it goes, a penny above does not
+    for (total, ok) in [(500.0, true), (500.01, false)] {
+        let server = MockServer::start().await;
+        preview_mock(gbp(total)).mount(&server).await;
+        submit_mock(gbp(total), u64::from(ok)).mount(&server).await;
+        let r = with_ceiling(&server, "500 gbp")
+            .submit_order(&request, &confirmed(total))
+            .await;
+        assert_eq!(r.is_ok(), ok, "{total}: {r:?}");
+    }
+}
+
+#[test]
+fn a_ceiling_is_an_amount_and_an_iso_currency() {
+    let c: OrderCeiling = " 1250.50  usd ".parse().unwrap();
+    assert_eq!(c.amount().to_string(), "1250.50");
+    assert_eq!(c.currency(), "USD");
+    assert_eq!(c.to_string(), "1250.50 USD");
+    for bad in [
+        "500",
+        "EUR 500",
+        "500 EUR EUR",
+        "500 XYZ",
+        "500,00 EUR",
+        "-5 EUR",
+        "0 EUR",
+        "",
+        "1e3 EUR",
+    ] {
+        assert!(bad.parse::<OrderCeiling>().is_err(), "{bad:?}");
+    }
 }

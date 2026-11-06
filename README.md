@@ -42,9 +42,10 @@ Searching and reading change nothing. Changing a cart and placing an order each 
 own gate, and every order needs the person's confirmation:
 
 1. **Cart changes** need `MOUSER_ALLOW_CART_WRITES=true`.
-2. **Orders** need `MOUSER_ALLOW_ORDERS=true` **and** a ceiling, `MOUSER_MAX_ORDER_TOTAL`
-   (in the order's currency). Without a ceiling no order is placed. The check is in the
-   library, below the MCP layer.
+2. **Orders** need `MOUSER_ALLOW_ORDERS=true` **and** a ceiling, `MOUSER_MAX_ORDER_TOTAL`,
+   an amount and its currency (`"500 EUR"`). Without a ceiling no order is placed, and an
+   order in another currency is refused: the caller chooses an order's currency, so a ceiling
+   without one would bound nothing. The check is in the library, below the MCP layer.
 3. `preview_order` always sends `SubmitOrder: false`, whatever the request says. Only
    `submit_order` sends `true`, and only after a **fresh preview** matches what the caller
    confirmed: currency, total and every line. If the price moved since the preview, nothing is
@@ -163,6 +164,9 @@ chmod 600 ~/.config/mouser/*-api-key
   invoice terms) and VAT details come from your Mouser account; `query_order_options` lists
   what it offers. With a validated EU VAT number the preview can show no tax (reverse
   charge). Mouser fills in the order type (for example `Rush`: ship what is in stock first).
+- **`MOUSER_MAX_ORDER_TOTAL` needs its currency.** `"500 EUR"`, not `500`: a bare number
+  stops the server from starting. Orders are placed only in the ceiling's
+  currency; to order in another, change the ceiling.
 - **Ordering needs a client that shows MCP forms** (elicitation), as Claude Code does: the
   person confirms the order there. Without one, `submit_order` refuses.
 - **"The order may have been placed"** means the submission went out and no answer came
@@ -200,7 +204,7 @@ claude mcp add mouser --env MOUSER_SEARCH_API_KEY_FILE=$HOME/.config/mouser/sear
 | `MOUSER_ORDER_API_KEY_FILE` / `MOUSER_ORDER_API_KEY` | — | Cart and Order API key |
 | `MOUSER_ALLOW_CART_WRITES` | `false` | Enable cart changes |
 | `MOUSER_ALLOW_ORDERS` | `false` | Enable `submit_order` / `submit_order_from_order` |
-| `MOUSER_MAX_ORDER_TOTAL` | — | Order ceiling in the order's currency; required to order |
+| `MOUSER_MAX_ORDER_TOTAL` | — | Order ceiling with its currency, `"500 EUR"` (amount with a point, ISO 4217 code); required to order, and only orders in that currency are placed |
 | `MOUSER_MAX_CALLS_PER_MINUTE` | `30` | Client-side spacing of calls (Mouser limits calls per key) |
 | `MOUSER_TIMEOUT_MS` | `30000` | HTTP timeout |
 | `MOUSER_API_BASE` | `https://api.mouser.com/api` | API root (tests and the demo) |

@@ -21,8 +21,8 @@ schemars = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-rusty-money = { version = "0.5.1", features = ["iso"] }
-rust_decimal = "1.43.0"
+rusty-money = { workspace = true }
+rust_decimal = { workspace = true }
 
 [dev-dependencies]
 # the client side of MCP, to drive the server over an in-memory transport in tests
