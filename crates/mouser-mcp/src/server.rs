@@ -3,7 +3,10 @@ use mouser::{ApiKey, Client, Config, KeyKind};
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, ContentBlock, ErrorCode, ErrorData, ServerCapabilities, ServerConfig},
+    model::{
+        CallToolResult, ContentBlock, ErrorCode, ErrorData, Implementation, ServerCapabilities,
+        ServerConfig,
+    },
     tool, tool_handler, tool_router,
 };
 use serde_json::Value;
@@ -457,6 +460,10 @@ impl MouserServer {
 impl ServerHandler for MouserServer {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(
+                Implementation::new("mouser-mcp", env!("CARGO_PKG_VERSION"))
+                    .with_title("Mouser Electronics"),
+            )
             .with_instructions(INSTRUCTIONS)
     }
 }
