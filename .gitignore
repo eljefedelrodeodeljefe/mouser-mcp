@@ -1,0 +1,7 @@
+/target
+.env
+.env.*
+*.bak
+.DS_Store
+# API keys never live in the repo
+*api-key*

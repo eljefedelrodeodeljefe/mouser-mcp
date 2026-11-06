@@ -1,0 +1,29 @@
+[package]
+name = "mouser-mcp"
+description = "MCP server for the Mouser Electronics APIs: part search with live stock and pricing, cart, order history, ordering"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+
+[[bin]]
+name = "mouser-mcp"
+path = "src/main.rs"
+
+[dependencies]
+mouser = { workspace = true, features = ["schemars"] }
+rmcp = { version = "3.9", features = ["server", "transport-io"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }
+
+[lints]
+workspace = true

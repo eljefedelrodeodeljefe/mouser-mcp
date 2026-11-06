@@ -1,0 +1,12 @@
+# Source-code spell checking (crate-ci/typos). Exceptions are genuine false positives.
+
+[default.extend-words]
+# Mouser's own spelling of the order-options request type in its Swagger documents
+# (OrderInializeRequestRoot); renaming it would break the mapping to the API.
+Inialize = "Inialize"
+# "part number", as in Mouser's APMfrPN (alternate-packaging manufacturer part number).
+pn = "pn"
+
+[files]
+# Generated files: release-please owns CHANGELOG.md, cargo owns Cargo.lock.
+extend-exclude = ["CHANGELOG.md", "Cargo.lock"]
