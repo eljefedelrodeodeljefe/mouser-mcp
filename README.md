@@ -173,6 +173,9 @@ chmod 600 ~/.config/mouser/*-api-key
 - **"The order may have been placed"** means the submission went out and no answer came
   back. Check the order history (or Mouser's website) before you submit again: a second
   submission can place a second order.
+- **"The cart was written but did not verify"** (`add_cart_items`, code `-32002`): the cart
+  changed, and reading it back did not show what was written. Look at it with `get_cart`
+  before anything else: calling `add_cart_items` again adds the quantities a second time.
 - **API carts have their own `CartKey`.** Keep the key the tools return; whether an API cart
   also shows up in the website's basket has not been verified.
 

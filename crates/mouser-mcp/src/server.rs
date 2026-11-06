@@ -407,7 +407,7 @@ impl MouserServer {
     }
 
     #[tool(
-        description = "Add parts to a cart, keeping what is in it. Without cart_key: a new cart (MouserCart AddCartItems, POST /api/v1/cart/items/insert). With cart_key: reads the cart (GET /api/v1/cart), adds the items (quantities of a part already there add up), writes the whole cart (MouserCart UpdateCart, POST /api/v1/cart) and reads it back; fails if any line is missing or wrong, because Mouser's insert endpoint has been seen dropping existing lines. Requires MOUSER_ALLOW_CART_WRITES"
+        description = "Add parts to a cart, keeping what is in it. Without cart_key: a new cart (MouserCart AddCartItems, POST /api/v1/cart/items/insert). With cart_key: reads the cart (GET /api/v1/cart), adds the items (quantities of a part already there add up), writes the whole cart (MouserCart UpdateCart, POST /api/v1/cart) and reads it back; fails if any line is missing or wrong, because Mouser's insert endpoint has been seen dropping existing lines. That failure (code -32002) means the cart was written: read it with get_cart before anything else, since calling add_cart_items again adds the quantities twice. Requires MOUSER_ALLOW_CART_WRITES"
     )]
     async fn add_cart_items(
         &self,

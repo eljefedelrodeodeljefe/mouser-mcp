@@ -395,11 +395,35 @@ pub async fn add_cart_items(c: &Client, p: &CartItemsParams) -> Result<Value> {
         country,
         currency,
     )
-    .await?;
-    let after = c.get_cart(key, country, currency).await?;
-    check_cart(&after, &merged)?;
+    .await
+    .map_err(|e| match e {
+        // sent, and no answer: the cart may hold the new quantities
+        mouser::Error::Transport(_) => {
+            CartUnverified(format!("the write got no answer ({e})")).into()
+        }
+        e => anyhow::Error::from(e),
+    })?;
+    let after = c
+        .get_cart(key, country, currency)
+        .await
+        .map_err(|e| CartUnverified(format!("reading it back failed ({e})")))?;
+    check_cart(&after, &merged).map_err(|e| CartUnverified(e.to_string()))?;
     to_value(after)
 }
+
+/// `add_cart_items` wrote the cart and could not confirm that it holds what was written. Not
+/// an argument to fix: the cart has (or may have) changed, and the same call again would add
+/// the quantities a second time.
+#[derive(Debug)]
+pub struct CartUnverified(pub String);
+
+impl std::fmt::Display for CartUnverified {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the cart was written but did not verify: {}", self.0)
+    }
+}
+
+impl std::error::Error for CartUnverified {}
 
 fn same_part(a: &str, b: &str) -> bool {
     a.trim().eq_ignore_ascii_case(b.trim())
@@ -489,7 +513,7 @@ fn check_cart(cart: &CartResponseRoot, want: &[CartItemRequest]) -> Result<()> {
     }
     anyhow::ensure!(
         problems.is_empty(),
-        "the cart does not hold what was written: {}",
+        "it does not hold what was written: {}",
         problems.join("; ")
     );
     Ok(())
@@ -820,9 +844,50 @@ mod tests {
             .await;
         let e = add_cart_items(&order_client(&server), &add(vec![("67-ST0645", 2, None)]))
             .await
-            .unwrap_err()
-            .to_string();
-        assert!(e.contains("139-ZX10R-2-183-S+ is missing"), "{e}");
+            .unwrap_err();
+        assert!(
+            e.to_string().contains("139-ZX10R-2-183-S+ is missing"),
+            "{e}"
+        );
+        // Not "fix your arguments": the cart was written, and the same call again would add
+        // the quantities a second time.
+        let mcp = crate::error::tool_error(e);
+        assert_ne!(mcp.code, rmcp::model::ErrorCode::INVALID_PARAMS, "{mcp:?}");
+        assert!(
+            mcp.message.contains("was written") && mcp.message.contains("get_cart"),
+            "{mcp:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cart_write_without_an_answer_is_not_a_failure_to_retry() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        let splitter = json!({"MouserPartNumber": "139-ZX10R-2-183-S+", "Quantity": 2});
+        mount_carts(&server, cart(json!([splitter])), cart(json!([splitter]))).await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/cart"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(cart(json!([])))
+                    .set_delay(std::time::Duration::from_millis(1500)),
+            )
+            .mount(&server)
+            .await;
+        let c = Client::new(mouser::Config {
+            base_url: format!("{}/api", server.uri()),
+            order_key: Some(mouser::ApiKey::new("test-order-key-0000").unwrap()),
+            max_calls_per_minute: 0,
+            timeout: std::time::Duration::from_millis(500),
+            ..Default::default()
+        })
+        .unwrap();
+        let e = add_cart_items(&c, &add(vec![("67-ST0645", 2, None)]))
+            .await
+            .unwrap_err();
+        let mcp = crate::error::tool_error(e);
+        assert_eq!(mcp.code, crate::error::CART_UNVERIFIED, "{mcp:?}");
     }
 
     #[test]
