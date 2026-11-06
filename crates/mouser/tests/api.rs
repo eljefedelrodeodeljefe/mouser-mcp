@@ -4,7 +4,7 @@
 use mouser::models::*;
 use mouser::{ApiKey, Client, Config, DateFilter, Error, ExpectedOrder, KeyKind};
 use serde_json::{Value, json};
-use wiremock::matchers::{body_json, method, path, query_param};
+use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const SEARCH_KEY: &str = "search-key-0000-0000";
@@ -244,6 +244,8 @@ async fn cart_calls_use_the_order_key_and_query_parameters() {
         .and(path("/api/v1/cart/item/remove"))
         .and(query_param("cartKey", "cart-1"))
         .and(query_param("mouserPartNumber", "139-ZFRSC-42-S+"))
+        // Mouser's CDN refuses a POST without a length (411): the call must carry one.
+        .and(header("content-length", "0"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(json!({"Errors": [], "CartKey": "cart-1", "CartItems": []})),
