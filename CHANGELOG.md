@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.6.0](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.5.0...v0.6.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* MOUSER_MAX_ORDER_TOTAL takes "<amount> <currency>", e.g. MOUSER_MAX_ORDER_TOTAL="500 EUR". A bare amount stops the server from starting, and orders in a currency other than the ceiling's are refused. In the library, Config::max_order_total is Option<OrderCeiling> (build one with "500 EUR".parse() or OrderCeiling::new(amount, "EUR")).
+* preview_order_from_order and submit_order_from_order no longer take `order` (an OrderRequestType), `country_code` or a separate `currency_code` query argument. Pass `order_number`, `cart_key`, `currency_code`, optional `shipping_code` and `payment_method` (as for preview_order), and `total` for the submission. Ship-to and freight accounts come from the Mouser account.
+
+### Bug Fixes
+
+* a cart written but not verified is not an argument error ([ab7235d](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/ab7235daadd4a2d66ae7a8d4d1f09ac4b44df852))
+* a confirmation form nobody answers ends after ten minutes ([164507c](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/164507c5f8caf1ddbc391b18871d236a8490e10e))
+* a submission without an answer says the order may have been placed ([2668db5](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/2668db5df13a2b1bec7e8b04547d360f70f4572f))
+* log the order trail at info by default ([24a09c9](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/24a09c9642c07ae2576746457d24e431798ecdf9))
+* re-orders take the short order choices, not a whole order body ([ca1160c](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/ca1160c095545cd6cdb5a5065f53f75d2b524e70))
+* the order ceiling names its currency ([6fa36c5](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/6fa36c5592886aa9d1dc883e2b0298489a26aaac))
+* the rate limiter and pending confirmations run on tokio's clock ([1afb2d1](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/1afb2d12cb1d41e90125db87535935cc2c4b0a27))
+* yes/no settings accept six words, any case, and refuse the rest ([7577eef](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/7577eefe8adfb5e8cd3844a35d374506498a6418))
+
+
+### Documentation
+
+* **agents:** #[expect] with a reason where a lint is wrong for one site ([6b4227e](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/6b4227ea6ea62f7943556fdd029a7bf4f6c5e849))
+* demo GIFs in the README ([5924123](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/5924123d4a05702901ebdaa419b14454651f6657))
+* demo GIFs in the README ([93527c0](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/93527c0023b7f2c20926f8684a2e8ea90ecc01a5))
+* getting the two Mouser keys, the pitfalls, and the order form ([2c768f2](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/2c768f2f9585511044f6220d0c72d35c3cb809ef))
+* prose sweep against the airdress prose rules ([0df4286](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/0df4286cf2cc3001cd8b65140d55b980356671d2))
+* prose sweep against the airdress prose rules ([db77611](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/db77611c01b1ca5d8ecb97ca97a5341f4ee5cdd1))
+
 ## [0.5.0](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.4.0...v0.5.0) (2026-11-06)
 
 
