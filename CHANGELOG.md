@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.4.0...v0.5.0) (2026-11-06)
+
+
+### Features
+
+* the order form lists the lines in one multi-select field ([#11](https://github.com/eljefedelrodeodeljefe/mouser-mcp/issues/11)) ([373b0f2](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/373b0f268f3a2792f5006f53f10875593aa88f9f))
+
 ## [0.4.0](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.3.0...v0.4.0) (2026-11-06)
 
 
