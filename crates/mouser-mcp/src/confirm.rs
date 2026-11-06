@@ -17,7 +17,8 @@
 //!   again with the answer and the echoed `requestState`. The state is only a handle to a
 //!   pending confirmation kept here: single use, expiring, bound to the exact arguments of the
 //!   first call, and holding the lines and total the user was shown.
-//! - **earlier versions**: the server sends `elicitation/create` while the tool call is open.
+//! - **earlier versions**: the server sends `elicitation/create` while the tool call is open,
+//!   and waits [`TTL`] for the answer.
 //!
 //! A client that supports neither cannot confirm, and no order is placed.
 

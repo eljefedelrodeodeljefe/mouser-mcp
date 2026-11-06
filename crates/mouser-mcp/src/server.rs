@@ -246,10 +246,16 @@ impl MouserServer {
                 Answer::Refused(why) => Err(user_refused(tool, why)),
             };
         }
-        let result = ctx
-            .peer
-            .create_elicitation(params)
+        // The same limit as a pending confirmation on the round-trip path: a form nobody
+        // answers must not hold the call open, and an answer after that is not taken.
+        let result = tokio::time::timeout(confirm::TTL, ctx.peer.create_elicitation(params))
             .await
+            .map_err(|_| {
+                user_refused(
+                    tool,
+                    "no answer to the confirmation form within ten minutes",
+                )
+            })?
             .map_err(|e| refused(format!("the confirmation failed: {e}")))?;
         let response = serde_json::to_value(&result)
             .map_err(|e| refused(format!("the confirmation failed: {e}")))?;
@@ -814,6 +820,8 @@ mod tests {
         place: bool,
         /// keep every line selected
         lines: bool,
+        /// never answer: the form stays open
+        silent: bool,
     }
 
     fn yes() -> Reply {
@@ -821,6 +829,7 @@ mod tests {
             action: ElicitationAction::Accept,
             place: true,
             lines: true,
+            silent: false,
         }
     }
 
@@ -864,6 +873,12 @@ mod tests {
                 .answer
                 .clone()
                 .expect("no form for a client without elicitation");
+            if r.silent {
+                // The user walks away. Only the server's own timeout can end this; paused time
+                // gets there at once (the preview is done, nothing else needs real time).
+                tokio::time::pause();
+                std::future::pending::<()>().await;
+            }
             // A user who keeps (or drops one of) the listed lines and ticks (or not) the box.
             let mut content = serde_json::Map::new();
             for (key, field) in schema["properties"].as_object().unwrap() {
@@ -1167,5 +1182,33 @@ mod tests {
                 assert!(!schema.contains(field), "{tool} takes {field}: {schema}");
             }
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_form_nobody_answers_places_nothing_and_ends() {
+        let mouser = MockServer::start().await;
+        mount_order(&mouser, true, 0).await;
+        mount_order(&mouser, false, 1..).await;
+        let silent = Reply {
+            silent: true,
+            ..yes()
+        };
+        let call = call_through_mcp(
+            &mouser,
+            ProtocolVersion::V_2025_06_18,
+            Some(silent),
+            "submit_order",
+            json!({"cart_key": "cart-1", "currency_code": "EUR", "total": 200.0}),
+            |_| {},
+        );
+        let (r, shown) = tokio::time::timeout(confirm::TTL * 2, call)
+            .await
+            .expect("the confirmation times out after its TTL");
+        assert_eq!(shown.len(), 1);
+        let e = r.expect_err("no answer, no order");
+        assert!(
+            e.contains("nothing was ordered") && e.contains("no answer"),
+            "{e}"
+        );
     }
 }

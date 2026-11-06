@@ -61,7 +61,8 @@ own gate, and every order needs the person's confirmation:
    answering places nothing. A client that cannot show forms cannot order. On protocol
    `2026-07-28` the form travels as an `InputRequiredResult` (multi round-trip); the pending
    confirmation stays on the server, is single use, expires after ten minutes and is bound to
-   the exact arguments of the call, so an answer cannot be replayed onto another order.
+   the exact arguments of the call, so an answer cannot be replayed onto another order. On
+   earlier protocols the server waits for the answer for ten minutes as well, then refuses.
 
 5. **No answer is not "nothing happened".** If the submission times out or the connection
    drops after it was sent, Mouser may have placed the order. The tool then fails with its
