@@ -181,7 +181,7 @@ impl MouserServer {
                 "this MCP client cannot show a confirmation form (MCP elicitation), and orders need one",
             ));
         }
-        let form = confirm::form(preview, self.client.config().max_order_total);
+        let form = confirm::form(preview);
         let round_trip = ctx
             .protocol_version()
             .is_some_and(|v| v >= ProtocolVersion::V_2026_07_28);
@@ -914,7 +914,7 @@ mod tests {
             assert_eq!(shown.len(), 1, "{protocol:?}");
             let (message, schema) = &shown[0];
             assert!(
-                message.starts_with("Real order at Mouser: 200.00 EUR (1 line"),
+                message.starts_with("Real order at Mouser: 200.00 EUR · 1 line"),
                 "{message}"
             );
             assert_eq!(

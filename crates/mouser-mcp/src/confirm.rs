@@ -58,7 +58,7 @@ pub struct Form {
 
 /// Builds the form: a one-line message, the lines as a multi-select list, all selected, and
 /// an unticked "Place this order".
-pub fn form(preview: &OrderRoot, ceiling: Option<f64>) -> Form {
+pub fn form(preview: &OrderRoot) -> Form {
     let o = preview.order.clone().unwrap_or_default();
     let cur = o.currency_code.as_deref().unwrap_or("?");
     let lines = o.order_lines.as_deref().unwrap_or(&[]);
@@ -100,15 +100,13 @@ pub fn form(preview: &OrderRoot, ceiling: Option<f64>) -> Form {
             facts.push(format!("to {}", who.join(" ")));
         }
     }
-    let mut message = format!(
-        "Real order at Mouser: {} {cur} ({}).",
+    // Claude Code shows the message on one line, cut at about 150 characters: facts only, the
+    // fields explain themselves. The ceiling is enforced, not shown.
+    let message = format!(
+        "Real order at Mouser: {} {cur} · {}",
         money(o.order_total),
         facts.join(" · ")
     );
-    if let Some(c) = ceiling {
-        message += &format!(" Ceiling {c:.2}.");
-    }
-    message += " All lines are selected; deselect one to stop. Tick \"Place this order\" to buy.";
 
     let width = lines.len().max(1).to_string().len().max(2);
     let mut options = vec![];
@@ -342,7 +340,7 @@ mod tests {
 
     #[test]
     fn the_form_has_a_one_line_summary_a_list_of_lines_and_one_box() {
-        let f = form(&preview(2), Some(650.0));
+        let f = form(&preview(2));
         assert!(!f.message.contains('\n'), "{}", f.message);
         for want in [
             "Real order at Mouser: 533.78 EUR",
@@ -351,7 +349,6 @@ mod tests {
             "tax 0.00",
             "PayPal",
             "to Robert L Berlin DE",
-            "Ceiling 650.00",
         ] {
             assert!(
                 f.message.contains(want),
@@ -377,7 +374,7 @@ mod tests {
 
     #[test]
     fn line_keys_sort_in_order_however_many_lines() {
-        let f = form(&preview(120), None);
+        let f = form(&preview(120));
         assert_eq!(f.keys[0], "line_001");
         assert_eq!(f.keys[119], "line_120");
         let mut sorted = f.keys.clone();

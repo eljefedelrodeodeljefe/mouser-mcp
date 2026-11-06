@@ -3,9 +3,8 @@
 # Render from the repository root:  vhs demo/order.tape
 # Uses the demo Mouser API (demo/fake_mouser.py): the "order" gets a DEMO- number, nothing is bought.
 #
-# The form keys below assume Claude Code's form dialog: Down/Up move within the list, Tab
-# moves to the next field, Space toggles, Enter submits. If a Claude Code release changes them,
-# adjust the block marked FORM.
+# The form keys below are Claude Code 2.1's form dialog (checked by hand). If a release
+# changes them, adjust the block marked FORM.
 
 Output demo/order.gif
 Output demo/order.mp4
@@ -38,9 +37,12 @@ Enter
 # cart, order options, preview, then submit_order opens the form
 Sleep 45s
 
-# FORM: "Order lines" (all selected) first, then "Place this order" (unticked).
-# Show the list, then move to the checkbox, tick it, submit.
+# FORM: "Order lines" (collapsed, all selected), then "Place this order" (unticked), then
+# Accept / Decline. → expands the list; ↓ walks the lines and, past the last, moves to the
+# checkbox; Space ticks it; ↓ moves to Accept; Enter submits.
 Sleep 3s
+Right
+Sleep 2s
 Down
 Sleep 700ms
 Down
@@ -50,11 +52,11 @@ Sleep 700ms
 Down
 Sleep 700ms
 Down
-Sleep 700ms
-Tab
 Sleep 1s
 Space
 Sleep 1.5s
+Down
+Sleep 1s
 Enter
 Sleep 12s
 
