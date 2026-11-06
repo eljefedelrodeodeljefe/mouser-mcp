@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 schemars = { workspace = true, optional = true }
+time = { version = "0.3.55", features = ["macros", "parsing", "formatting"] }
 
 [features]
 # JSON Schema derives for the request and response types, for callers that expose them as

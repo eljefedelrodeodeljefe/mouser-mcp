@@ -305,6 +305,11 @@ async fn order_history_dates_are_sent_the_way_mouser_wants_them() {
         .await
         .unwrap();
     assert!(mouser::mouser_date("2026-13-01").is_err() && mouser::mouser_date("tomorrow").is_err());
+    assert!(
+        mouser::mouser_date("2026-02-30").is_err(),
+        "a date that does not exist"
+    );
+    assert_eq!(mouser::mouser_date("01/05/2026").unwrap(), "1/5/2026");
 }
 
 fn order_request() -> OrderRequestRootType {

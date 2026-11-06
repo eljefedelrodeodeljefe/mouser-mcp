@@ -21,6 +21,8 @@ schemars = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+rusty-money = { version = "0.5.1", features = ["iso"] }
+rust_decimal = "1.43.0"
 
 [dev-dependencies]
 wiremock = { workspace = true }

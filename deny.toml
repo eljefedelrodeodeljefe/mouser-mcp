@@ -1,0 +1,30 @@
+# cargo-deny: `cargo deny check` — advisories, licences, bans, sources.
+
+[advisories]
+# RustSec advisories, including unmaintained and yanked crates.
+yanked = "deny"
+
+[licenses]
+# Permissive licences only: everything here is compatible with shipping MIT binaries.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "BSL-1.0",
+  "Unlicense",
+  # webpki-roots: the Mozilla CA list, as data.
+  "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use mouser::models::*;
 use mouser::{Client, PartSearchOption, SearchOption};
+use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
 use crate::params::*;
@@ -154,35 +155,33 @@ pub async fn list_manufacturers(c: &Client, p: &ManufacturersParams) -> Result<V
 
 // ── BOM pricing ─────────────────────────────────────────────────────────────────────────
 
-/// Mouser formats prices for the account's locale: "$91.00", "87,10 €", "€1.234,56".
-pub fn parse_price(s: &str) -> Option<f64> {
-    let t: String = s
-        .chars()
-        .filter(|c| c.is_ascii_digit() || *c == '.' || *c == ',')
-        .collect();
-    if t.is_empty() {
-        return None;
-    }
-    let (dot, comma) = (t.rfind('.'), t.rfind(','));
-    let normal = match (dot, comma) {
-        (Some(d), Some(c)) if c > d => t.replace('.', "").replace(',', "."),
-        (Some(_), Some(_)) => t.replace(',', ""),
-        // a lone comma with 1-3 decimals after it is a decimal comma ("87,10"); "1,234" too
-        // ambiguous to be anything but thousands only with exactly three digits and no cents
-        (None, Some(c)) if t.len() - c - 1 != 3 => t.replace(',', "."),
-        (None, Some(_)) => t.replace(',', ""),
-        _ => t,
-    };
-    normal.parse().ok()
+/// A Mouser price string ("87,10 €", "$91.00") as an exact amount in `currency`. The amount is
+/// read by `rusty_money` with that currency's own separators, after removing its symbol;
+/// anything else (another symbol, another locale's separators) gives `None` rather than a
+/// guess.
+pub fn parse_price(raw: &str, currency: &str) -> Option<Decimal> {
+    let cur = rusty_money::iso::find(currency)?;
+    let amount = raw.replace(cur.symbol, "");
+    let amount = amount.trim_matches(|c: char| c.is_whitespace());
+    rusty_money::Money::from_str(amount, cur)
+        .ok()
+        .map(|m| *m.amount())
 }
 
-fn int(s: &Option<String>) -> Option<i64> {
-    s.as_deref()
-        .and_then(|v| v.replace([',', '.'], "").trim().parse().ok())
+/// Mouser's counts ("283", "1") as integers; anything else is unknown, not zero.
+fn count(s: &Option<String>) -> Option<i64> {
+    s.as_deref().and_then(|v| v.trim().parse().ok())
 }
 
-/// Unit price at `qty`: the largest price break whose quantity is at most `qty`.
-fn price_at(p: &MouserPart, qty: i64) -> Option<(f64, i64, String)> {
+struct Price {
+    unit: Decimal,
+    break_quantity: i64,
+    currency: String,
+}
+
+/// Unit price at `qty`: the largest price break whose quantity is at most `qty` (the first
+/// break below the minimum). `Err(raw)` if that break's price cannot be read.
+fn price_at(p: &MouserPart, qty: i64) -> Option<Result<Price, String>> {
     let mut breaks: Vec<&Pricebreak> = p.price_breaks.as_deref().unwrap_or(&[]).iter().collect();
     breaks.sort_by_key(|b| b.quantity.unwrap_or(0));
     let b = breaks
@@ -190,11 +189,16 @@ fn price_at(p: &MouserPart, qty: i64) -> Option<(f64, i64, String)> {
         .rev()
         .find(|b| b.quantity.unwrap_or(0) <= qty)
         .or(breaks.first())?;
-    Some((
-        parse_price(b.price.as_deref()?)?,
-        b.quantity.unwrap_or(0),
-        b.currency.clone().unwrap_or_default(),
-    ))
+    let raw = b.price.clone().unwrap_or_default();
+    let currency = b.currency.clone().unwrap_or_default();
+    Some(match parse_price(&raw, &currency) {
+        Some(unit) => Ok(Price {
+            unit,
+            break_quantity: b.quantity.unwrap_or(0),
+            currency,
+        }),
+        None => Err(format!("{raw} ({currency})")),
+    })
 }
 
 fn matches(p: &MouserPart, part_number: &str) -> bool {
@@ -234,36 +238,31 @@ pub async fn price_bom(c: &Client, p: &BomParams) -> Result<Value> {
             .await?;
         found.extend(r.search_results.and_then(|s| s.parts).unwrap_or_default());
     }
-    let mut totals: BTreeMap<String, f64> = BTreeMap::new();
+    let mut totals: BTreeMap<String, Decimal> = BTreeMap::new();
     let mut out = Vec::new();
     for l in &p.lines {
+        let qty = Decimal::from(l.quantity);
         let cands: Vec<&MouserPart> = found
             .iter()
             .filter(|f| matches(f, &l.part_number))
             .collect();
-        // prefer an offer that covers the quantity from stock, then the lowest extended price
-        let best = cands.iter().min_by(|a, b| {
-            let key = |x: &MouserPart| {
-                let short = int(&x.availability_in_stock).unwrap_or(0) < l.quantity;
-                let ext = price_at(x, l.quantity)
-                    .map(|(u, _, _)| u * l.quantity as f64)
-                    .unwrap_or(f64::MAX);
-                (short, ext)
+        // prefer an offer known to cover the quantity from stock, then the lowest extended price
+        let best = cands.iter().min_by_key(|x| {
+            let short = count(&x.availability_in_stock).is_none_or(|s| s < l.quantity);
+            let ext = match price_at(x, l.quantity) {
+                Some(Ok(pr)) => pr.unit * qty,
+                _ => Decimal::MAX,
             };
-            let (ka, kb) = (key(a), key(b));
-            ka.0.cmp(&kb.0).then(ka.1.total_cmp(&kb.1))
+            (short, ext)
         });
         let line = match best {
-            None => {
-                json!({"reference": l.reference, "part_number": l.part_number, "quantity": l.quantity,
-                "status": "not_found"})
-            }
+            None => json!({"reference": l.reference, "part_number": l.part_number,
+                "quantity": l.quantity, "status": "not_found"}),
             Some(b) => {
-                let stock = int(&b.availability_in_stock).unwrap_or(0);
-                let price = price_at(b, l.quantity);
-                let min = int(&b.min).unwrap_or(1);
-                let mult = int(&b.mult).unwrap_or(1).max(1);
+                let stock = count(&b.availability_in_stock);
                 let mut notes = Vec::new();
+                let min = count(&b.min).unwrap_or(1);
+                let mult = count(&b.mult).unwrap_or(1).max(1);
                 if l.quantity < min {
                     notes.push(format!("below the minimum order quantity {min}"));
                 }
@@ -276,26 +275,43 @@ pub async fn price_bom(c: &Client, p: &BomParams) -> Result<Value> {
                 {
                     notes.push("discontinued".into());
                 }
-                let extended = price.as_ref().map(|(u, _, _)| u * l.quantity as f64);
-                if let (Some(e), Some((_, _, cur))) = (extended, price.as_ref()) {
-                    *totals.entry(cur.clone()).or_default() += e;
+                let price = match price_at(b, l.quantity) {
+                    Some(Ok(pr)) => Some(pr),
+                    Some(Err(raw)) => {
+                        notes.push(format!("price not readable: {raw}"));
+                        None
+                    }
+                    None => {
+                        notes.push("no price breaks".into());
+                        None
+                    }
+                };
+                let extended = price.as_ref().map(|pr| pr.unit * qty);
+                if let (Some(e), Some(pr)) = (extended, price.as_ref()) {
+                    *totals.entry(pr.currency.clone()).or_default() += e;
                 }
+                let status = match stock {
+                    Some(s) if s >= l.quantity => "in_stock",
+                    Some(_) => "short",
+                    None => "stock_unknown",
+                };
                 json!({
                     "reference": l.reference,
                     "part_number": l.part_number,
                     "quantity": l.quantity,
-                    "status": if stock >= l.quantity { "in_stock" } else { "short" },
+                    "status": status,
                     "MouserPartNumber": b.mouser_part_number,
                     "Manufacturer": b.manufacturer,
                     "ManufacturerPartNumber": b.manufacturer_part_number,
                     "Description": b.description,
                     "in_stock": stock,
+                    "AvailabilityInStock": b.availability_in_stock,
                     "AvailabilityOnOrder": b.availability_on_order,
                     "LeadTime": b.lead_time,
-                    "unit_price": price.as_ref().map(|p| p.0),
-                    "price_break_quantity": price.as_ref().map(|p| p.1),
-                    "currency": price.as_ref().map(|p| p.2.clone()),
-                    "extended_price": extended,
+                    "unit_price": price.as_ref().map(|pr| pr.unit.to_string()),
+                    "price_break_quantity": price.as_ref().map(|pr| pr.break_quantity),
+                    "currency": price.as_ref().map(|pr| pr.currency.clone()),
+                    "extended_price": extended.map(|e| e.to_string()),
                     "notes": notes,
                     "other_offers": cands.len() - 1,
                     "ProductDetailUrl": b.product_detail_url,
@@ -304,6 +320,10 @@ pub async fn price_bom(c: &Client, p: &BomParams) -> Result<Value> {
         };
         out.push(line);
     }
+    let totals: BTreeMap<String, String> = totals
+        .into_iter()
+        .map(|(k, v)| (k, v.to_string()))
+        .collect();
     Ok(json!({ "lines": out, "totals_by_currency": totals }))
 }
 
@@ -522,18 +542,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prices_parse_in_the_formats_mouser_uses() {
-        for (s, v) in [
-            ("$91.00", 91.0),
-            ("87,10 €", 87.1),
-            ("€1.234,56", 1234.56),
-            ("$1,234.56", 1234.56),
-            ("¥12,345", 12345.0),
-            ("0,0459 €", 0.0459),
+    fn prices_are_read_with_the_currency_s_own_separators_or_not_at_all() {
+        let d = |v: &str| v.parse::<Decimal>().unwrap();
+        for (raw, cur, v) in [
+            ("87,10 €", "EUR", "87.10"),
+            ("€1.234,56", "EUR", "1234.56"),
+            ("$91.00", "USD", "91.00"),
+            ("$1,234.56", "USD", "1234.56"),
+            ("0,0459 €", "EUR", "0.0459"),
+            ("£12.50", "GBP", "12.50"),
         ] {
-            assert_eq!(parse_price(s), Some(v), "{s}");
+            assert_eq!(parse_price(raw, cur), Some(d(v)), "{raw} {cur}");
         }
-        assert_eq!(parse_price("call"), None);
+        // another locale's separators, an unknown symbol, no number: refused, never guessed
+        for (raw, cur) in [
+            ("$91,00", "USD"),
+            ("87.10 €", "EUR"),
+            ("US$ 9.00", "USD"),
+            ("call", "EUR"),
+            ("1", "XXX9"),
+        ] {
+            assert_eq!(parse_price(raw, cur), None, "{raw} {cur}");
+        }
     }
 
     #[test]
@@ -548,9 +578,10 @@ mod tests {
             price_breaks: Some(vec![b(10, "80,00 €"), b(1, "90,00 €"), b(100, "70,00 €")]),
             ..Default::default()
         };
-        assert_eq!(price_at(&part, 1).unwrap().0, 90.0);
-        assert_eq!(price_at(&part, 99).unwrap().0, 80.0);
-        assert_eq!(price_at(&part, 500).unwrap().0, 70.0);
+        let unit = |q| price_at(&part, q).unwrap().unwrap().unit.to_string();
+        assert_eq!(unit(1), "90.00");
+        assert_eq!(unit(99), "80.00");
+        assert_eq!(unit(500), "70.00");
     }
 
     #[tokio::test]
@@ -602,11 +633,10 @@ mod tests {
         let l = &r["lines"];
         assert_eq!(l[0]["MouserPartNumber"], "139-ZFRSC-42-S+", "{r:#}");
         assert_eq!(l[0]["status"], "in_stock");
-        assert_eq!(l[0]["extended_price"], 174.2);
+        assert_eq!(l[0]["extended_price"], "174.20");
         assert_eq!(l[0]["other_offers"], 1);
         assert_eq!(l[1]["status"], "not_found");
         assert_eq!(l[2]["MouserPartNumber"], "139-ZFRSC-42-S+A"); // one piece: the cheaper offer covers it
-        let total = r["totals_by_currency"]["EUR"].as_f64().unwrap();
-        assert!((total - 254.2).abs() < 1e-9, "{total}");
+        assert_eq!(r["totals_by_currency"]["EUR"], "254.20");
     }
 }

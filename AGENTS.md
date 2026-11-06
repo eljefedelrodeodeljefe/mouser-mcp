@@ -61,6 +61,17 @@ Ordering spends real money. These are not negotiable:
   of URLs (`reqwest::Error::without_url`) and replies are scrubbed of the key.
 - Tests never call the real Mouser API. Live checks go through `examples/probe.rs`, read-only.
 
+## Things to avoid
+
+- Don't add AI attribution to commits or PRs. No `Co-Authored-By` trailers for AI tools:
+  commits are authored by the human who reviews and accepts the change.
+- Don't hand-roll parsing. Dates go through `time`, money through `rusty_money` (each
+  currency's own separators) into exact `rust_decimal` amounts, JSON through `serde`. A value
+  that does not parse is reported as unreadable, never guessed.
+- Don't add dependencies casually; justify each in the commit message. `cargo deny check`
+  (advisories, licences, sources: `deny.toml`) runs in CI.
+- Don't disable lints to make CI pass.
+
 ## Gates
 
 All commits must pass `prek run --all-files`: `cargo fmt`, `cargo clippy --all-targets -- -D

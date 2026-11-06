@@ -195,33 +195,19 @@ pub fn join_part_numbers(parts: &[String]) -> Result<String> {
     Ok(parts.iter().map(|p| p.trim()).collect::<Vec<_>>().join("|"))
 }
 
-/// Mouser's order-history dates are mm/dd/yyyy. Accepts that or ISO yyyy-mm-dd.
+/// Mouser's order-history dates are m/d/yyyy (its example: `1/30/2019`). Accepts ISO
+/// `yyyy-mm-dd` or that form, and rejects dates that do not exist.
 pub fn mouser_date(d: &str) -> Result<String> {
-    let bad = || Error::InvalidArgument(format!("date {d:?}: use yyyy-mm-dd or mm/dd/yyyy"));
-    let (y, m, day) = if let Some((y, rest)) = d.split_once('-') {
-        let (m, day) = rest.split_once('-').ok_or_else(bad)?;
-        (y, m, day)
-    } else {
-        let mut it = d.split('/');
-        let (m, day, y) = (
-            it.next().ok_or_else(bad)?,
-            it.next().ok_or_else(bad)?,
-            it.next().ok_or_else(bad)?,
-        );
-        if it.next().is_some() {
-            return Err(bad());
-        }
-        (y, m, day)
-    };
-    let (y, m, day): (u32, u32, u32) = (
-        y.parse().map_err(|_| bad())?,
-        m.parse().map_err(|_| bad())?,
-        day.parse().map_err(|_| bad())?,
-    );
-    if !(1990..=2100).contains(&y) || !(1..=12).contains(&m) || !(1..=31).contains(&day) {
-        return Err(bad());
-    }
-    Ok(format!("{m}/{day}/{y}"))
+    use time::macros::format_description;
+    let iso = format_description!("[year]-[month]-[day]");
+    let us = format_description!("[month padding:none]/[day padding:none]/[year]");
+    let us_padded = format_description!("[month]/[day]/[year]");
+    let date = time::Date::parse(d.trim(), &iso)
+        .or_else(|_| time::Date::parse(d.trim(), &us))
+        .or_else(|_| time::Date::parse(d.trim(), &us_padded))
+        .map_err(|_| Error::InvalidArgument(format!("date {d:?}: use yyyy-mm-dd or mm/dd/yyyy")))?;
+    date.format(&us)
+        .map_err(|e| Error::InvalidArgument(format!("date {d:?}: {e}")))
 }
 
 fn check_records(records: Option<i64>) -> Result<()> {

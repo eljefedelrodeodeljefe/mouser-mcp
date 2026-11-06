@@ -26,7 +26,9 @@ Only the tools for the keys you configure are listed.
 `price_bom` takes BOM lines (part number, quantity, your reference), looks them up ten per
 call by exact part number, picks the offer that covers the quantity from stock at the lowest
 extended price, prices it at the line's quantity from the price breaks, flags shortages,
-minimum and multiple violations and discontinued parts, and totals per currency.
+minimum and multiple violations and discontinued parts, and totals per currency. Amounts are
+exact decimals, read with each currency's own separators; a price or stock figure that does not
+parse is flagged on its line, never guessed.
 
 Search results are compact by default (stock, lead time, Min/Mult, price breaks, lifecycle,
 URLs); `full: true` returns Mouser's whole record. The library keeps every field Mouser sends,
