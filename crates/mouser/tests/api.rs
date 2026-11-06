@@ -2,7 +2,7 @@
 //! documents define them, error mapping, key handling and the order safety checks.
 
 use mouser::models::*;
-use mouser::{ApiKey, Client, Config, DateFilter, Error, ExpectedOrder, KeyKind};
+use mouser::{ApiKey, Client, Config, DateFilter, Error, ExpectedOrder, KeyKind, OrderCeiling};
 use serde_json::{Value, json};
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -16,7 +16,7 @@ fn client(server: &MockServer, ceiling: Option<f64>) -> Client {
         search_key: Some(ApiKey::new(SEARCH_KEY).unwrap()),
         order_key: Some(ApiKey::new(ORDER_KEY).unwrap()),
         max_calls_per_minute: 0,
-        max_order_total: ceiling,
+        max_order_total: ceiling.map(|c| format!("{c} EUR").parse().unwrap()),
         ..Config::default()
     })
     .unwrap()
@@ -427,4 +427,242 @@ async fn order_options_decode_enum_numbers_where_swagger_documents_strings() {
         v["OrderInitialize"]["ShippingAddress"]["AddressLocationTypeID"],
         "1"
     );
+}
+
+#[tokio::test]
+async fn a_submission_that_times_out_may_have_placed_the_order() {
+    let server = MockServer::start().await;
+    mount_order(&server, false, order_reply(200.0, 2), 1).await;
+    // Mouser takes the order, and the reply arrives after the client gave up.
+    Mock::given(method("POST"))
+        .and(path("/api/v1/order"))
+        .and(body_json(
+            json!({"Order": {"CartKey": "cart-1", "CurrencyCode": "EUR", "SubmitOrder": true}}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(order_reply(200.0, 2))
+                .set_delay(std::time::Duration::from_millis(1500)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = Client::new(Config {
+        base_url: format!("{}/api", server.uri()),
+        order_key: Some(ApiKey::new(ORDER_KEY).unwrap()),
+        max_calls_per_minute: 0,
+        max_order_total: Some("500 EUR".parse().unwrap()),
+        timeout: std::time::Duration::from_millis(500),
+        ..Config::default()
+    })
+    .unwrap();
+    let e = c
+        .submit_order(&order_request(), &expected(200.0))
+        .await
+        .unwrap_err();
+    assert!(matches!(e, Error::SubmitOutcomeUnknown(_)), "{e:?}");
+    let source = std::error::Error::source(&e).expect("the transport error is kept");
+    assert!(source.to_string().contains("transport"), "{source}");
+    assert!(!format!("{e:?}").contains(ORDER_KEY), "{e:?}");
+
+    // A transport failure of the preview placed nothing: it stays a transport error.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/order"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(order_reply(200.0, 2))
+                .set_delay(std::time::Duration::from_millis(1500)),
+        )
+        .mount(&server)
+        .await;
+    let c = Client::new(Config {
+        base_url: format!("{}/api", server.uri()),
+        order_key: Some(ApiKey::new(ORDER_KEY).unwrap()),
+        max_calls_per_minute: 0,
+        max_order_total: Some("500 EUR".parse().unwrap()),
+        timeout: std::time::Duration::from_millis(500),
+        ..Config::default()
+    })
+    .unwrap();
+    let e = c
+        .submit_order(&order_request(), &expected(200.0))
+        .await
+        .unwrap_err();
+    assert!(matches!(e, Error::Transport(_)), "{e:?}");
+}
+
+/// What this thread logs. One global subscriber writes each thread's events to that thread's
+/// buffer: a subscriber set per test would race with the tests running beside it (tracing
+/// caches per call site whether anyone listens).
+#[derive(Clone, Copy)]
+struct Logs;
+
+thread_local! {
+    static LOGGED: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+impl std::io::Write for Logs {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        LOGGED.with(|l| l.borrow_mut().extend_from_slice(b));
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Logs {
+    /// Starts collecting this thread's log afresh.
+    fn capture() -> Self {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            tracing::subscriber::set_global_default(
+                tracing_subscriber::fmt()
+                    .with_ansi(false)
+                    .with_max_level(tracing::Level::INFO)
+                    .with_writer(|| Logs)
+                    .finish(),
+            )
+            .expect("the only subscriber of this test binary");
+            tracing::callsite::rebuild_interest_cache();
+        });
+        LOGGED.with(|l| l.borrow_mut().clear());
+        Logs
+    }
+
+    fn text(self) -> String {
+        LOGGED.with(|l| String::from_utf8_lossy(&l.borrow()).into_owned())
+    }
+}
+
+#[tokio::test]
+async fn placed_and_refused_orders_leave_an_audit_line() {
+    let logs = Logs::capture();
+
+    let server = MockServer::start().await;
+    let mut placed = order_reply(200.0, 2);
+    placed["Order"]["OrderID"] = json!("placed-1");
+    placed["Order"]["ShippingAddress"] = json!({"AddressOne": "Secret Street 1", "City": "Berlin"});
+    mount_order(&server, false, order_reply(200.0, 2), 1).await;
+    mount_order(&server, true, placed, 1).await;
+    client(&server, Some(500.0))
+        .submit_order(&order_request(), &expected(200.0))
+        .await
+        .unwrap();
+    let text = logs.text();
+    let line = text
+        .lines()
+        .find(|l| l.contains("Mouser order placed"))
+        .unwrap_or_else(|| panic!("no audit line in {text}"));
+    for want in [
+        "INFO",
+        "order_id=\"placed-1\"",
+        "total=200",
+        "currency=\"EUR\"",
+    ] {
+        assert!(line.contains(want), "{want} missing in {line}");
+    }
+    assert!(
+        !text.contains("Secret Street") && !text.contains(ORDER_KEY),
+        "{text}"
+    );
+
+    let server = MockServer::start().await;
+    mount_order(&server, false, order_reply(210.0, 2), 1).await;
+    client(&server, Some(500.0))
+        .submit_order(&order_request(), &expected(200.0))
+        .await
+        .unwrap_err();
+    let text = logs.text();
+    assert!(
+        text.lines().any(|l| l.contains("WARN")
+            && l.contains("order refused")
+            && l.contains("total is 210")),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn the_ceiling_holds_only_in_its_own_currency() {
+    let gbp = |total: f64| {
+        json!({"Order": {"Errors": [], "CurrencyCode": "GBP", "OrderTotal": total,
+            "OrderLines": [{"MouserPartNumber": "139-ZFRSC-42-S+", "Quantity": 2}]}})
+    };
+    let mut request = order_request();
+    request.order.as_mut().unwrap().currency_code = "GBP".into();
+    let confirmed = |total: f64| ExpectedOrder {
+        currency_code: "GBP".into(),
+        ..expected(total)
+    };
+    let submit_mock = |reply: Value, times: u64| {
+        Mock::given(method("POST"))
+            .and(path("/api/v1/order"))
+            .and(body_json(
+                json!({"Order": {"CartKey": "cart-1", "CurrencyCode": "GBP", "SubmitOrder": true}}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(reply))
+            .expect(times)
+    };
+    let preview_mock = |reply: Value| {
+        Mock::given(method("POST"))
+            .and(path("/api/v1/order"))
+            .and(body_json(json!({"Order": {"CartKey": "cart-1", "CurrencyCode": "GBP", "SubmitOrder": false}})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(reply))
+    };
+    let with_ceiling = |server: &MockServer, ceiling: &str| {
+        Client::new(Config {
+            base_url: format!("{}/api", server.uri()),
+            order_key: Some(ApiKey::new(ORDER_KEY).unwrap()),
+            max_calls_per_minute: 0,
+            max_order_total: Some(ceiling.parse().unwrap()),
+            ..Config::default()
+        })
+        .unwrap()
+    };
+
+    // 500 meant as EUR: a 450 GBP order is not under it, whatever the number says
+    let server = MockServer::start().await;
+    preview_mock(gbp(450.0)).mount(&server).await;
+    submit_mock(gbp(450.0), 0).mount(&server).await;
+    let e = with_ceiling(&server, "500 EUR")
+        .submit_order(&request, &confirmed(450.0))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&e, Error::OrderMismatch(m) if m.contains("GBP") && m.contains("500 EUR")),
+        "{e:?}"
+    );
+
+    // in its own currency the ceiling is compared exactly: at it goes, a penny above does not
+    for (total, ok) in [(500.0, true), (500.01, false)] {
+        let server = MockServer::start().await;
+        preview_mock(gbp(total)).mount(&server).await;
+        submit_mock(gbp(total), u64::from(ok)).mount(&server).await;
+        let r = with_ceiling(&server, "500 gbp")
+            .submit_order(&request, &confirmed(total))
+            .await;
+        assert_eq!(r.is_ok(), ok, "{total}: {r:?}");
+    }
+}
+
+#[test]
+fn a_ceiling_is_an_amount_and_an_iso_currency() {
+    let c: OrderCeiling = " 1250.50  usd ".parse().unwrap();
+    assert_eq!(c.amount().to_string(), "1250.50");
+    assert_eq!(c.currency(), "USD");
+    assert_eq!(c.to_string(), "1250.50 USD");
+    for bad in [
+        "500",
+        "EUR 500",
+        "500 EUR EUR",
+        "500 XYZ",
+        "500,00 EUR",
+        "-5 EUR",
+        "0 EUR",
+        "",
+        "1e3 EUR",
+    ] {
+        assert!(bad.parse::<OrderCeiling>().is_err(), "{bad:?}");
+    }
 }

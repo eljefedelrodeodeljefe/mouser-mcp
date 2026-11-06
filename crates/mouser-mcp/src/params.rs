@@ -304,30 +304,25 @@ pub struct SubmitOrderParams {
     pub total: f64,
 }
 
+/// Re-ordering an earlier order takes the same short choices as ordering a cart: ship-to,
+/// freight accounts and the rest come from the Mouser account, never from the model, because
+/// the user's form shows only name, city and country of the address.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FromOrderParams {
     #[schemars(description = "Web order number of the earlier order")]
     pub order_number: i64,
-    #[schemars(description = "The new order (OrderRequestType); SubmitOrder is ignored")]
-    pub order: OrderRequestType,
-    #[schemars(description = "countryCode")]
-    pub country_code: Option<String>,
-    #[schemars(description = "currencyCode")]
-    pub currency_code: Option<String>,
+    #[serde(flatten)]
+    pub order: OrderChoice,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SubmitFromOrderParams {
     #[schemars(description = "Web order number of the earlier order")]
     pub order_number: i64,
-    #[schemars(description = "The new order (OrderRequestType), as previewed")]
-    pub order: OrderRequestType,
-    #[schemars(description = "countryCode")]
-    pub country_code: Option<String>,
-    #[schemars(description = "currencyCode")]
-    pub currency_code: Option<String>,
+    #[serde(flatten)]
+    pub order: OrderChoice,
     #[schemars(
-        description = "The OrderTotal of preview_order_from_order. The fresh preview must match it, and the user then confirms every line in a form"
+        description = "The OrderTotal of preview_order_from_order, in currency_code. The fresh preview must match it, and the user then confirms every line in a form"
     )]
     pub total: f64,
 }

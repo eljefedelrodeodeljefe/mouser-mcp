@@ -20,6 +20,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 schemars = "1.0"
 wiremock = "0.6"
+rust_decimal = "1.43.0"
+rusty-money = { version = "0.5.1", features = ["iso"] }
 
 # Output goes through `tracing`: stdout carries the MCP JSON-RPC stream.
 [workspace.lints.clippy]

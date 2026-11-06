@@ -1,0 +1,4 @@
+# Time goes through tokio's clock, so tests can pause it (tokio::time::pause).
+disallowed-types = [
+  { path = "std::time::Instant", reason = "use tokio::time::Instant: paused time in tests moves it" },
+]

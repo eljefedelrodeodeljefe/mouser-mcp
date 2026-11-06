@@ -829,6 +829,8 @@ version = "0.5.0"
 dependencies = [
  "anyhow",
  "reqwest",
+ "rust_decimal",
+ "rusty-money",
  "schemars",
  "serde",
  "serde_json",

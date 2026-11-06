@@ -42,9 +42,10 @@ Searching and reading change nothing. Changing a cart and placing an order each 
 own gate, and every order needs the person's confirmation:
 
 1. **Cart changes** need `MOUSER_ALLOW_CART_WRITES=true`.
-2. **Orders** need `MOUSER_ALLOW_ORDERS=true` **and** a ceiling, `MOUSER_MAX_ORDER_TOTAL`
-   (in the order's currency). Without a ceiling no order is placed. The check is in the
-   library, below the MCP layer.
+2. **Orders** need `MOUSER_ALLOW_ORDERS=true` **and** a ceiling, `MOUSER_MAX_ORDER_TOTAL`,
+   an amount and its currency (`"500 EUR"`). Without a ceiling no order is placed, and an
+   order in another currency is refused: the caller chooses an order's currency, so a ceiling
+   without one would bound nothing. The check is in the library, below the MCP layer.
 3. `preview_order` always sends `SubmitOrder: false`, whatever the request says. Only
    `submit_order` sends `true`, and only after a **fresh preview** matches what the caller
    confirmed: currency, total and every line. If the price moved since the preview, nothing is
@@ -60,11 +61,22 @@ own gate, and every order needs the person's confirmation:
    answering places nothing. A client that cannot show forms cannot order. On protocol
    `2026-07-28` the form travels as an `InputRequiredResult` (multi round-trip); the pending
    confirmation stays on the server, is single use, expires after ten minutes and is bound to
-   the exact arguments of the call, so an answer cannot be replayed onto another order.
+   the exact arguments of the call, so an answer cannot be replayed onto another order. On
+   earlier protocols the server waits for the answer for ten minutes as well, then refuses.
+
+5. **No answer is not "nothing happened".** If the submission times out or the connection
+   drops after it was sent, Mouser may have placed the order. The tool then fails with its
+   own error (code `-32001`, "the order may have been placed") instead of a transport error,
+   and says to look for the order (`order_history_by_date_filter` with `Today`, or
+   `get_order`) before submitting again. The server never retries a submission.
 
 An order takes four steps: `query_order_options` (shipping and payment codes),
 `preview_order` (`cart_key`, `currency_code`, `shipping_code`, `payment_method`),
 `submit_order` (the same, plus the preview's `total`), and the user's answer in the form.
+A re-order of an earlier order takes the same arguments plus its `order_number`
+(`preview_order_from_order`, `submit_order_from_order`). Neither takes an address or freight
+accounts: those come from the Mouser account, so the model cannot send an order somewhere the
+form does not show.
 
 Keys travel in Mouser's query string, so the client never logs URLs, strips them from
 transport errors, scrubs the key from any reply that echoes it, and redacts `ApiKey` in
@@ -153,8 +165,17 @@ chmod 600 ~/.config/mouser/*-api-key
   invoice terms) and VAT details come from your Mouser account; `query_order_options` lists
   what it offers. With a validated EU VAT number the preview can show no tax (reverse
   charge). Mouser fills in the order type (for example `Rush`: ship what is in stock first).
+- **`MOUSER_MAX_ORDER_TOTAL` needs its currency.** `"500 EUR"`, not `500`: a bare number
+  stops the server from starting. Orders are placed only in the ceiling's
+  currency; to order in another, change the ceiling.
 - **Ordering needs a client that shows MCP forms** (elicitation), as Claude Code does: the
   person confirms the order there. Without one, `submit_order` refuses.
+- **"The order may have been placed"** means the submission went out and no answer came
+  back. Check the order history (or Mouser's website) before you submit again: a second
+  submission can place a second order.
+- **"The cart was written but did not verify"** (`add_cart_items`, code `-32002`): the cart
+  changed, and reading it back did not show what was written. Look at it with `get_cart`
+  before anything else: calling `add_cart_items` again adds the quantities a second time.
 - **API carts have their own `CartKey`.** Keep the key the tools return; whether an API cart
   also shows up in the website's basket has not been verified.
 
@@ -187,12 +208,16 @@ claude mcp add mouser --env MOUSER_SEARCH_API_KEY_FILE=$HOME/.config/mouser/sear
 | `MOUSER_ORDER_API_KEY_FILE` / `MOUSER_ORDER_API_KEY` | — | Cart and Order API key |
 | `MOUSER_ALLOW_CART_WRITES` | `false` | Enable cart changes |
 | `MOUSER_ALLOW_ORDERS` | `false` | Enable `submit_order` / `submit_order_from_order` |
-| `MOUSER_MAX_ORDER_TOTAL` | — | Order ceiling in the order's currency; required to order |
+| `MOUSER_MAX_ORDER_TOTAL` | — | Order ceiling with its currency, `"500 EUR"` (amount with a point, ISO 4217 code); required to order, and only orders in that currency are placed |
 | `MOUSER_MAX_CALLS_PER_MINUTE` | `30` | Client-side spacing of calls (Mouser limits calls per key) |
 | `MOUSER_TIMEOUT_MS` | `30000` | HTTP timeout |
 | `MOUSER_API_BASE` | `https://api.mouser.com/api` | API root (tests and the demo) |
 
-At least one key is required. `RUST_LOG=mouser=debug` logs each call (never the key) to stderr.
+At least one key is required. The `MOUSER_ALLOW_*` switches take `true`/`false`, `1`/`0` or
+`yes`/`no` in any case; any other value stops the server with an error naming the variable.
+The server logs to stderr at `info` unless `RUST_LOG` says
+otherwise: each submission, each order placed (its id, total and currency, never the address)
+and each refusal. `RUST_LOG=mouser=debug` also logs each call (never the key).
 
 ## Library
 

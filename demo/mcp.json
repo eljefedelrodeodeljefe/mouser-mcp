@@ -8,7 +8,7 @@
         "MOUSER_ORDER_API_KEY": "demo-order-key-00000",
         "MOUSER_ALLOW_CART_WRITES": "true",
         "MOUSER_ALLOW_ORDERS": "true",
-        "MOUSER_MAX_ORDER_TOTAL": "650"
+        "MOUSER_MAX_ORDER_TOTAL": "650 EUR"
       }
     }
   }

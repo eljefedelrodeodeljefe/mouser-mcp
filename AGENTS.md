@@ -53,14 +53,25 @@ Ordering spends real money. These rules have no exceptions:
 - Only `Client::submit_order` and `Client::submit_order_from_order` may send
   `SubmitOrder: true`. Every other path forces `false`.
 - A submission previews again and goes ahead only if currency, total and every line match
-  what was confirmed, and the total is within `Config::max_order_total`. No ceiling
-  configured means no order. These checks live in the library, below the tool layer; do not
-  add a parameter that relaxes them.
+  what was confirmed, and the total is within `Config::max_order_total`, an `OrderCeiling`
+  (`"500 EUR"`). No ceiling configured means no order, and so does an order in a currency
+  other than the ceiling's: the caller picks the currency, so a bare amount bounds nothing.
+  The ceiling is compared as a `Decimal`. These checks live in the library, below the tool
+  layer; do not add a parameter that relaxes them.
 - After those checks and before submitting, the user confirms the order in an MCP
   elicitation form (`crates/mouser-mcp/src/confirm.rs`). Only an accepted form with every
   line still selected and `place_order: true` goes ahead, and the lines a submission must
   match are the ones shown in that form. A client without form elicitation cannot order.
   Every path that submits goes through that answer.
+- The order tools take only the short choices: `cart_key`, `currency_code`, `shipping_code`,
+  `payment_method`, and `order_number` for a re-order. The server builds the order body from
+  them. Ship-to, freight accounts, IEC code and the rest come from the Mouser account: the
+  form shows only name, city and country, and the checks do not bind them, so a submitting
+  tool never takes them from the model.
+- A submission that fails in transport once it was sent (timeout, dropped connection) may
+  have placed the order. It is `Error::SubmitOutcomeUnknown`, never a plain transport error,
+  and its MCP error (code `-32001`) says to check the order history before submitting again.
+  Nothing retries a submission.
 - Cart changes and orders are separate gates (`MOUSER_ALLOW_CART_WRITES`,
   `MOUSER_ALLOW_ORDERS`); neither implies the other.
 - Never log a URL or a request: the key is in the query string. Transport errors are stripped
@@ -81,8 +92,11 @@ Ordering spends real money. These rules have no exceptions:
 ## Gates
 
 All commits must pass `prek run --all-files`: `cargo fmt`, `cargo clippy --all-targets -- -D
-warnings` (**no `#[allow]` escapes**; fix the lint), `cargo test --all`, `typos`, TOML/YAML
-validation, markdownlint.
+warnings`, `cargo test --all`, `typos`, TOML/YAML validation, markdownlint.
+
+Fix the lint where you can. Where a lint is wrong for one site, put `#[expect(clippy::lint,
+reason = "…")]` on that site; a bare `#[allow]` is still refused. A lint allowed across the
+workspace goes in `[workspace.lints]`, with a comment giving the reason.
 
 ## Runtime
 

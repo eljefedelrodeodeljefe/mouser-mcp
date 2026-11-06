@@ -3,12 +3,14 @@
 
 use std::collections::VecDeque;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use rust_decimal::Decimal;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tokio::sync::Mutex;
+use tokio::time::Instant;
 
 use crate::error::{Error, KeyKind, Result};
 use crate::models::*;
@@ -66,9 +68,10 @@ pub struct Config {
     /// Client-side cap on calls per rolling minute, over both keys. Mouser enforces its own
     /// limits per key (see your API hub page); this keeps a busy agent well clear of them.
     pub max_calls_per_minute: u32,
-    /// Ceiling for `submit_order` / `submit_order_from_order`, in the order's currency. `None`
-    /// refuses every submission: placing an order needs an explicit ceiling.
-    pub max_order_total: Option<f64>,
+    /// Ceiling for `submit_order` / `submit_order_from_order`: an amount in one currency. An
+    /// order in another currency is refused, and `None` refuses every submission: placing an
+    /// order needs an explicit ceiling.
+    pub max_order_total: Option<OrderCeiling>,
 }
 
 impl Default for Config {
@@ -81,6 +84,72 @@ impl Default for Config {
             max_calls_per_minute: 30,
             max_order_total: None,
         }
+    }
+}
+
+/// The most an order may total, and the currency it is in: `"500 EUR"`. Only orders in that
+/// currency can be placed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderCeiling {
+    amount: Decimal,
+    currency: &'static str,
+}
+
+impl OrderCeiling {
+    /// A positive `amount` in `currency`, an ISO 4217 code such as `EUR`.
+    pub fn new(amount: Decimal, currency: &str) -> Result<Self> {
+        let cur =
+            rusty_money::iso::find(&currency.trim().to_ascii_uppercase()).ok_or_else(|| {
+                Error::InvalidArgument(format!(
+                    "order ceiling: {currency:?} is not an ISO 4217 currency"
+                ))
+            })?;
+        if amount <= Decimal::ZERO {
+            return Err(Error::InvalidArgument(format!(
+                "order ceiling: {amount} is not a positive amount"
+            )));
+        }
+        Ok(Self {
+            amount,
+            currency: cur.iso_alpha_code,
+        })
+    }
+
+    pub fn amount(&self) -> Decimal {
+        self.amount
+    }
+
+    /// The ISO 4217 code, upper case.
+    pub fn currency(&self) -> &str {
+        self.currency
+    }
+}
+
+impl std::str::FromStr for OrderCeiling {
+    type Err = Error;
+
+    /// `"<amount> <currency>"`, e.g. `"500 EUR"` or `"1250.50 USD"`: the amount as a plain
+    /// decimal (a point, no thousands separators), read by `rust_decimal`; the currency
+    /// checked against ISO 4217 by `rusty_money`.
+    fn from_str(s: &str) -> Result<Self> {
+        let unreadable = || {
+            Error::InvalidArgument(format!(
+                "order ceiling {s:?}: give the amount and its currency, e.g. \"500 EUR\""
+            ))
+        };
+        let mut words = s.split_whitespace();
+        let (Some(amount), Some(currency), None) = (words.next(), words.next(), words.next())
+        else {
+            return Err(unreadable());
+        };
+        let amount = Decimal::from_str_exact(amount).map_err(|_| unreadable())?;
+        Self::new(amount, currency)
+    }
+}
+
+impl std::fmt::Display for OrderCeiling {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.amount, self.currency)
     }
 }
 
@@ -806,14 +875,18 @@ impl Client {
         self.verify_order(&preview, expected)?;
         let body = with_submit(r, true)?;
         tracing::warn!(currency = %expected.currency_code, total = expected.order_total, "submitting a Mouser order");
-        self.call(
-            reqwest::Method::POST,
-            "/v1/order",
-            KeyKind::Order,
-            vec![],
-            Some(&body),
-        )
-        .await
+        let placed = self
+            .call(
+                reqwest::Method::POST,
+                "/v1/order",
+                KeyKind::Order,
+                vec![],
+                Some(&body),
+            )
+            .await
+            .map_err(outcome_unknown)?;
+        log_placed(&placed, expected, None);
+        Ok(placed)
     }
 
     /// `POST /api/v1/order/CreateFromOrder` with `SubmitOrder` false: summary of re-ordering
@@ -858,14 +931,18 @@ impl Client {
             total = expected.order_total,
             "submitting a Mouser re-order"
         );
-        self.call(
-            reqwest::Method::POST,
-            "/v1/order/CreateFromOrder",
-            KeyKind::Order,
-            q,
-            Some(&body),
-        )
-        .await
+        let placed = self
+            .call(
+                reqwest::Method::POST,
+                "/v1/order/CreateFromOrder",
+                KeyKind::Order,
+                q,
+                Some(&body),
+            )
+            .await
+            .map_err(outcome_unknown)?;
+        log_placed(&placed, expected, Some(order_number));
+        Ok(placed)
     }
 
     /// `POST /api/v1/order/item/CreateCartFromOrder` — a new cart holding an earlier order's
@@ -891,7 +968,15 @@ impl Client {
     /// and currency, total and every line match `expected`, the total within the ceiling.
     /// Public so a caller can run them on a preview before asking a user to confirm it.
     pub fn verify_order(&self, preview: &OrderRoot, expected: &ExpectedOrder) -> Result<()> {
-        let max = self.cfg.max_order_total.ok_or_else(|| {
+        let r = self.check_order(preview, expected);
+        if let Err(e) = &r {
+            tracing::warn!(reason = %e, "order refused");
+        }
+        r
+    }
+
+    fn check_order(&self, preview: &OrderRoot, expected: &ExpectedOrder) -> Result<()> {
+        let max = self.cfg.max_order_total.as_ref().ok_or_else(|| {
             Error::OrderMismatch("no order ceiling configured (MOUSER_MAX_ORDER_TOTAL)".into())
         })?;
         let o = preview
@@ -914,7 +999,15 @@ impl Client {
                 expected.order_total
             )));
         }
-        if total > max {
+        if !currency.eq_ignore_ascii_case(max.currency()) {
+            return Err(Error::OrderMismatch(format!(
+                "the order is in {currency} and the ceiling (MOUSER_MAX_ORDER_TOTAL) is {max}: only orders in {} can be placed",
+                max.currency()
+            )));
+        }
+        let exact = Decimal::try_from(total)
+            .map_err(|_| Error::Decode(format!("OrderTotal {total} is not an amount")))?;
+        if exact > max.amount() {
             return Err(Error::OrderMismatch(format!(
                 "total {total} {currency} is above the ceiling {max}"
             )));
@@ -940,6 +1033,36 @@ impl Client {
             )));
         }
         Ok(())
+    }
+}
+
+/// The audit line of a placed order: its id, total and currency (Mouser's reply, else what
+/// was confirmed). Never the address, the payment details or the request.
+fn log_placed(placed: &OrderRoot, expected: &ExpectedOrder, reorder_of: Option<i64>) {
+    let o = placed.order.as_ref();
+    tracing::info!(
+        order_id = o.and_then(|o| o.order_id.as_deref()).unwrap_or("?"),
+        total = o
+            .and_then(|o| o.order_total)
+            .unwrap_or(expected.order_total),
+        currency = o
+            .and_then(|o| o.currency_code.as_deref())
+            .unwrap_or(&expected.currency_code),
+        reorder_of,
+        "Mouser order placed"
+    );
+}
+
+/// A transport failure of the call that places an order: the request may have reached
+/// Mouser, so the order may exist. Every other failure is an answer from Mouser and stays
+/// what it is.
+fn outcome_unknown(e: Error) -> Error {
+    match e {
+        Error::Transport(_) => {
+            tracing::warn!(error = %e, "order outcome unknown: the submission failed after it was sent");
+            Error::SubmitOutcomeUnknown(Box::new(e))
+        }
+        e => e,
     }
 }
 
@@ -1009,5 +1132,43 @@ fn truncate(s: &str) -> String {
             end -= 1;
         }
         format!("{}…", &s[..end])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn limiter(per_minute: u32) -> Limiter {
+        Limiter {
+            per_minute,
+            calls: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_rate_limit_spaces_calls_over_a_rolling_minute() {
+        let l = limiter(2);
+        let start = Instant::now();
+        l.acquire().await;
+        tokio::time::advance(Duration::from_secs(10)).await;
+        l.acquire().await;
+        assert_eq!(
+            start.elapsed(),
+            Duration::from_secs(10),
+            "two calls fit a minute"
+        );
+        // The third waits until the first is a minute old, then the fourth for the second.
+        // Paused time moves only by the limiter's own sleeps; the guard stops a limiter that
+        // never sees the time move.
+        let third = tokio::time::timeout(Duration::from_secs(600), async {
+            l.acquire().await;
+            Instant::now()
+        })
+        .await
+        .expect("the third call is let through");
+        assert_eq!(third - start, Duration::from_secs(60));
+        l.acquire().await;
+        assert_eq!(start.elapsed(), Duration::from_secs(70));
     }
 }

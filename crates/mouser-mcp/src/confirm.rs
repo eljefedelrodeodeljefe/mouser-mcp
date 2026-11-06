@@ -17,19 +17,21 @@
 //!   again with the answer and the echoed `requestState`. The state is only a handle to a
 //!   pending confirmation kept here: single use, expiring, bound to the exact arguments of the
 //!   first call, and holding the lines and total the user was shown.
-//! - **earlier versions**: the server sends `elicitation/create` while the tool call is open.
+//! - **earlier versions**: the server sends `elicitation/create` while the tool call is open,
+//!   and waits [`TTL`] for the answer.
 //!
 //! A client that supports neither cannot confirm, and no order is placed.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use mouser::ExpectedOrder;
 use mouser::models::OrderRoot;
 use rmcp::model::{ElicitationSchema, JsonObject};
 use serde_json::{Value, json};
+use tokio::time::Instant;
 
 /// How long the user has to answer the form.
 pub const TTL: Duration = Duration::from_secs(10 * 60);
@@ -289,6 +291,29 @@ mod tests {
         assert_eq!(c.expected.order_total, 533.78);
         assert!(s.take(&id, "submit_order", &args(533.78)).is_err());
         assert!(s.take("order-99", "submit_order", &args(533.78)).is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_confirmation_expires_after_ten_minutes() {
+        let s = Store::default();
+        let id = s.open("submit_order", args(533.78), confirmed());
+        tokio::time::advance(TTL - Duration::from_secs(1)).await;
+        assert!(s.take(&id, "submit_order", &args(533.78)).is_ok());
+
+        let id = s.open("submit_order", args(533.78), confirmed());
+        tokio::time::advance(TTL).await;
+        let e = s.take(&id, "submit_order", &args(533.78)).err();
+        assert_eq!(e.as_deref(), Some("the confirmation expired; submit again"));
+
+        // an expired confirmation is dropped when the next one is asked for
+        let old = s.open("submit_order", args(533.78), confirmed());
+        tokio::time::advance(TTL).await;
+        s.open("submit_order", args(533.78), confirmed());
+        let e = s.take(&old, "submit_order", &args(533.78)).err();
+        assert_eq!(
+            e.as_deref(),
+            Some("unknown or already used confirmation; submit again")
+        );
     }
 
     #[test]
