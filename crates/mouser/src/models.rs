@@ -677,7 +677,8 @@ pub struct OrderAddress {
     #[serde(
         rename = "AddressLocationTypeID",
         default,
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::lenient::enum_text"
     )]
     pub address_location_type_id: Option<String>,
     #[serde(rename = "CountryCode")]
@@ -745,7 +746,8 @@ pub struct OrderAddressType {
     #[serde(
         rename = "AddressLocationTypeID",
         default,
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::lenient::enum_text"
     )]
     pub address_location_type_id: Option<String>,
     #[serde(
@@ -1437,7 +1439,12 @@ pub struct OrderRequestType {
     )]
     pub shipping_address: Option<OrderAddress>,
     /// One of: Unspecified, Rush, Complete.
-    #[serde(rename = "OrderType", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "OrderType",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::lenient::enum_text"
+    )]
     pub order_type: Option<String>,
     #[serde(
         rename = "PrimaryShipping",
@@ -1651,7 +1658,12 @@ pub struct PaymentTypeRequest {
     )]
     pub tax_certificate_key: Option<String>,
     /// One of: None, Taxable, NonTaxable.
-    #[serde(rename = "TaxStatus", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "TaxStatus",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::lenient::enum_text"
+    )]
     pub tax_status: Option<String>,
     #[serde(rename = "PoNumber", default, skip_serializing_if = "Option::is_none")]
     pub po_number: Option<String>,
@@ -1659,7 +1671,8 @@ pub struct PaymentTypeRequest {
     #[serde(
         rename = "VatInvoiceType",
         default,
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::lenient::enum_text"
     )]
     pub vat_invoice_type: Option<String>,
     #[serde(rename = "BankName", default, skip_serializing_if = "Option::is_none")]

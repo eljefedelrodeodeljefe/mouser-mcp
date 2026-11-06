@@ -400,3 +400,31 @@ async fn submit_needs_a_ceiling_and_a_matching_preview() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn order_options_decode_enum_numbers_where_swagger_documents_strings() {
+    // Mouser documents AddressLocationTypeID as "Residential", "Commercial", …, and sends 1.
+    let server = MockServer::start().await;
+    let address = json!({"AddressLocationTypeID": 1, "CountryCode": "DE", "FirstName": "A",
+        "LastName": "B", "AddressOne": "Street 1", "City": "Berlin", "PhoneNumber": "0"});
+    Mock::given(method("POST"))
+        .and(path("/api/v1/order/options/query"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"OrderInitialize": {
+            "CurrencyCode": "EUR", "BillingAddress": address, "ShippingAddress": address,
+            "Shipping": {"Methods": [{"Code": 65, "Method": "UPS Worldwide Express Saver"}]},
+            "Payment": {"PaymentTypes": [{"Method": 1081, "Name": "PayPal"}]}}})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let r = client(&server, None)
+        .order_options_query(&OrderInializeRequestRoot::default())
+        .await
+        .unwrap();
+    let v = serde_json::to_value(&r).unwrap();
+    assert_eq!(
+        v["OrderInitialize"]["ShippingAddress"]["AddressLocationTypeID"],
+        "1"
+    );
+}

@@ -12,6 +12,7 @@
 
 mod client;
 mod error;
+mod lenient;
 pub mod models;
 
 pub use client::{
