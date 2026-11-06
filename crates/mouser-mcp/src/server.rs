@@ -13,7 +13,7 @@ use rmcp::{
         ErrorCode, ErrorData, Implementation, InputRequest, InputRequests, InputRequiredResult,
         InputResponses, JsonObject, ProtocolVersion, ServerCapabilities, ServerConfig,
     },
-    service::{ElicitationError, ElicitationMode, RequestContext},
+    service::{ElicitationError, RequestContext},
     tool, tool_handler, tool_router,
 };
 use serde_json::Value;
@@ -33,6 +33,24 @@ pub struct MouserServer {
     orders: bool,
     /// Order confirmations asked for and not yet answered (multi round-trip path).
     confirmations: confirm::Store,
+}
+
+/// Whether the client declared form elicitation. Protocol 2026-07-28 has no initialize
+/// handshake: the client sends its capabilities with every request (SEP-2575), so those come
+/// first; earlier protocols declared them once, at initialization.
+fn can_show_forms(ctx: &RequestContext<RoleServer>) -> bool {
+    let caps = ctx
+        .meta
+        .client_capabilities()
+        .or_else(|| ctx.peer.peer_info().map(|i| i.capabilities.clone()));
+    form_elicitation(caps.as_ref())
+}
+
+/// An `elicitation` capability with `form`, or with neither `form` nor `url` (before modes
+/// existed, that meant forms).
+fn form_elicitation(caps: Option<&rmcp::model::ClientCapabilities>) -> bool {
+    caps.and_then(|c| c.elicitation.as_ref())
+        .is_some_and(|e| e.form.is_some() || e.url.is_none())
 }
 
 /// Whether an order goes ahead.
@@ -145,11 +163,12 @@ impl MouserServer {
         ctx: &RequestContext<RoleServer>,
     ) -> Result<Gate, ErrorData> {
         // Only a client that declared form elicitation shows the form to its user.
-        if !ctx
-            .peer
-            .supported_elicitation_modes()
-            .contains(&ElicitationMode::Form)
-        {
+        if !can_show_forms(ctx) {
+            tracing::warn!(
+                request = ?ctx.meta.client_capabilities().map(|c| c.elicitation),
+                handshake = ?ctx.peer.peer_info().map(|i| i.capabilities.elicitation.clone()),
+                "order refused: the client declared no form elicitation"
+            );
             return Err(refused(
                 "this MCP client cannot show a confirmation form (MCP elicitation), and orders need one",
             ));
@@ -670,6 +689,15 @@ mod tests {
     }
 
     impl ClientHandler for User {
+        fn get_info(&self) -> rmcp::model::ClientConfig {
+            let caps = if self.answer.is_some() {
+                ClientCapabilities::builder().enable_elicitation().build()
+            } else {
+                ClientCapabilities::default()
+            };
+            rmcp::model::ClientConfig::new(caps, Implementation::new("test", "0"))
+        }
+
         async fn create_elicitation(
             &self,
             request: ElicitRequestParams,
@@ -729,8 +757,24 @@ mod tests {
         } else {
             ClientCapabilities::default()
         };
-        let client_info = InitializeRequestParams::new(caps, Implementation::new("test", "0"))
-            .with_protocol_version(protocol.clone());
+        // 2026-07-28 has no handshake: capabilities travel with each request (as Claude Code
+        // sends them). Earlier protocols declare them once, at initialization.
+        let modern = protocol >= ProtocolVersion::V_2026_07_28;
+        let request_meta = modern.then(|| {
+            rmcp::model::RequestMetaObject::with_client_context(
+                protocol.clone(),
+                Implementation::new("test", "0"),
+                caps.clone(),
+            )
+        });
+        let handshake_caps = if modern {
+            ClientCapabilities::default()
+        } else {
+            caps
+        };
+        let client_info =
+            InitializeRequestParams::new(handshake_caps, Implementation::new("test", "0"))
+                .with_protocol_version(protocol.clone());
         let mut server_info =
             InitializeResult::new(ServerCapabilities::builder().enable_tools().build());
         server_info.protocol_version = protocol;
@@ -749,12 +793,10 @@ mod tests {
                     "expected": {"currency_code": "EUR", "order_total": 200.0,
                         "lines": [["139-ZFRSC-42-S+", 2]]}
                 });
-                let r = client
-                    .call_tool(
-                        CallToolRequestParams::new("submit_order")
-                            .with_arguments(args.as_object().unwrap().clone()),
-                    )
-                    .await;
+                let mut call = CallToolRequestParams::new("submit_order")
+                    .with_arguments(args.as_object().unwrap().clone());
+                call.meta = request_meta;
+                let r = client.call_tool(call).await;
                 srv.abort();
                 match r {
                     Ok(r) => Ok(r.content[0].as_text().unwrap().text.clone()),
@@ -765,6 +807,27 @@ mod tests {
             .await;
         let shown = shown.lock().unwrap().clone();
         (result, shown)
+    }
+
+    #[test]
+    fn form_elicitation_is_read_from_the_declared_capability() {
+        let caps =
+            |v: serde_json::Value| -> ClientCapabilities { serde_json::from_value(v).unwrap() };
+        assert!(form_elicitation(Some(&caps(
+            json!({"elicitation": {"form": {}, "url": {}}})
+        ))));
+        assert!(form_elicitation(Some(&caps(
+            json!({"elicitation": {"form": {}}})
+        ))));
+        assert!(
+            form_elicitation(Some(&caps(json!({"elicitation": {}})))),
+            "before modes existed"
+        );
+        assert!(!form_elicitation(Some(&caps(
+            json!({"elicitation": {"url": {}}})
+        ))));
+        assert!(!form_elicitation(Some(&caps(json!({})))));
+        assert!(!form_elicitation(None));
     }
 
     #[tokio::test(flavor = "current_thread")]
