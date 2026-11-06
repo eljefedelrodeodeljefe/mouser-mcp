@@ -2,8 +2,8 @@
 //! Mouser's own request types (PascalCase, as in Mouser's API documentation), so nothing is
 //! lost in translation.
 
-use mouser::models::{OrderAddress, OrderRequestType};
-use mouser::{DateFilter, ExpectedOrder, SearchOption};
+use mouser::models::{OrderAddress, OrderRequestType, PaymentTypeRequest, ShippingMethod};
+use mouser::{DateFilter, SearchOption};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -257,22 +257,51 @@ pub struct OrderNumberParams {
     pub order_number: i64,
 }
 
+/// The choices an order of a cart needs, as query_order_options lists them.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct OrderChoice {
+    #[schemars(description = "CartKey of the cart to order")]
+    pub cart_key: String,
+    #[schemars(description = "CurrencyCode, e.g. \"EUR\"")]
+    pub currency_code: String,
+    #[schemars(description = "Shipping method Code from query_order_options (PrimaryShipping)")]
+    pub shipping_code: Option<i64>,
+    #[schemars(description = "Payment Method from query_order_options, e.g. 1081 for PayPal")]
+    pub payment_method: Option<i64>,
+}
+
+impl OrderChoice {
+    pub fn request(&self) -> OrderRequestType {
+        OrderRequestType {
+            cart_key: self.cart_key.clone(),
+            currency_code: self.currency_code.clone(),
+            primary_shipping: self.shipping_code.map(|c| ShippingMethod {
+                code: Some(c),
+                ..Default::default()
+            }),
+            payment: self.payment_method.map(|m| PaymentTypeRequest {
+                method: m,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OrderParams {
-    #[schemars(
-        description = "The order, as Mouser's OrderRequestType: CartKey and CurrencyCode required; ShippingAddress, PrimaryShipping {Code}, Payment {Method, …} as query_order_options lists them. SubmitOrder is ignored"
-    )]
-    pub order: OrderRequestType,
+    #[serde(flatten)]
+    pub order: OrderChoice,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SubmitOrderParams {
-    #[schemars(description = "The same order that was previewed (OrderRequestType)")]
-    pub order: OrderRequestType,
+    #[serde(flatten)]
+    pub order: OrderChoice,
     #[schemars(
-        description = "What the user confirmed from preview_order: CurrencyCode, OrderTotal and every (MouserPartNumber, Quantity). The order is placed only if a fresh preview matches all of it"
+        description = "The OrderTotal of preview_order, in currency_code. Mouser's fresh preview must match it, and the user then confirms every line in a form"
     )]
-    pub expected: ExpectedOrder,
+    pub total: f64,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -297,8 +326,10 @@ pub struct SubmitFromOrderParams {
     pub country_code: Option<String>,
     #[schemars(description = "currencyCode")]
     pub currency_code: Option<String>,
-    #[schemars(description = "What the user confirmed from preview_order_from_order")]
-    pub expected: ExpectedOrder,
+    #[schemars(
+        description = "The OrderTotal of preview_order_from_order. The fresh preview must match it, and the user then confirms every line in a form"
+    )]
+    pub total: f64,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "mouser": {
+      "command": "./target/release/mouser-mcp",
+      "env": {
+        "MOUSER_API_BASE": "http://127.0.0.1:8787/api",
+        "MOUSER_SEARCH_API_KEY": "demo-search-key-0000",
+        "MOUSER_ORDER_API_KEY": "demo-order-key-00000",
+        "MOUSER_ALLOW_CART_WRITES": "true",
+        "MOUSER_ALLOW_ORDERS": "true",
+        "MOUSER_MAX_ORDER_TOTAL": "650"
+      }
+    }
+  }
+}
