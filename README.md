@@ -70,9 +70,29 @@ transport errors, scrubs the key from any reply that echoes it, and redacts `Api
 
 ## Demo
 
-[`demo/`](demo/) has scripted terminal recordings ([VHS](https://github.com/charmbracelet/vhs))
-of pricing a BOM and of an order confirmed in the form, against a stand-in Mouser API with
-demo data, so anyone can try the server without a Mouser account.
+The confirmation form in Claude Code, captured from the [demo](demo/) (stand-in Mouser API,
+demo data, nothing bought). The model prepared the cart and the preview; only the person can
+answer this:
+
+```text
+MCP server "mouser" requests your input
+Real order at Mouser: 533.78 EUR · 5 lines · merchandise 493.78 · UPS Worldwide Express Saver 40.00 · tax 0.00 · PayPal · to Ada Lovelace Berlin DE
+❯ ✔ Order lines: ▾
+      ❯ ☒ "2 × ZX10R-2-183-S+  161.10 each  = 322.20 EUR"
+        ☒ "2 × FMAT7467-6  53.10 each  = 106.20 EUR"
+        ☒ "1 × 415-0033-M1.0  17.44 each  = 17.44 EUR"
+        ☒ "1 × 415-0033-M2.0  22.68 each  = 22.68 EUR"
+        ☒ "2 × ST0645  12.63 each  = 25.26 EUR"
+      Everything in this order. Deselect any line to stop the order.
+  ✔ Place this order: 533.78 EUR: ☐
+      A real purchase, charged to the payment method above
+  Accept    Decline
+Esc to cancel · ↑/↓ to navigate · Backspace to unset · Space to toggle
+```
+
+[`demo/`](demo/) also has scripted terminal recordings ([VHS](https://github.com/charmbracelet/vhs))
+of pricing a BOM and of an order confirmed in this form, against the same stand-in API, so
+anyone can try the server without a Mouser account.
 
 ## Install
 
@@ -95,15 +115,42 @@ Release binaries (Linux and macOS, x86_64 and aarch64, with SBOMs) are attached 
 
 ## Keys
 
-Request keys in your Mouser account under **API Hub** (<https://www.mouser.com/api-hub/>):
-the **Search API** key, and if you want carts and orders, the **Cart and Order API** key. Put
-each in its own file, readable only by you:
+Mouser issues **two separate keys**, and each works only for its own API:
+
+| Key | For | Where |
+|---|---|---|
+| **Search API** key | search, `price_bom` | <https://www.mouser.com/api-hub/>, under *Search API*: request it (it is not issued automatically) |
+| **Cart and Order API** key | carts, order history, orders | the same page, *Manage APIs*: one key covers Order, Cart and Order History |
+
+Both look like GUIDs (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`). Put each in its own file,
+readable only by you:
 
 ```sh
 mkdir -p ~/.config/mouser && chmod 700 ~/.config/mouser
 $EDITOR ~/.config/mouser/search-api-key        # paste the key, one line
-chmod 600 ~/.config/mouser/search-api-key
+$EDITOR ~/.config/mouser/order-api-key         # optional: carts and orders
+chmod 600 ~/.config/mouser/*-api-key
 ```
+
+### Pitfalls
+
+- **`Invalid (API Key): Invalid unique identifier.`** is what Mouser answers to a key used for
+  the wrong API, as well as to a mistyped one. If *Manage APIs* shows Order, Cart and Order
+  History next to your key, that is the Cart and Order key: the Search API needs its own.
+- **The server reads the key files when it starts.** After changing one, restart the server
+  (in Claude Code: `/mcp`, then reconnect `mouser`). An empty key file stops it from starting.
+- **Calls are rate limited per key.** The server spaces them to
+  `MOUSER_MAX_CALLS_PER_MINUTE` (30 by default); `price_bom` looks up ten lines per call.
+- **Prices and currency follow your Mouser account's region** (mouser.de prices in EUR, for
+  example); `price_bom` reports them per currency.
+- **Ordering uses the account's defaults.** Shipping address, payment methods (PayPal, card,
+  invoice terms) and VAT details come from your Mouser account; `query_order_options` lists
+  what it offers. With a validated EU VAT number the preview can show no tax (reverse
+  charge). Mouser fills in the order type (for example `Rush`: ship what is in stock first).
+- **Ordering needs a client that shows MCP forms** (elicitation), as Claude Code does: the
+  person confirms the order there. Without one, `submit_order` refuses.
+- **API carts have their own `CartKey`.** Keep the key the tools return; whether an API cart
+  also shows up in the website's basket has not been verified.
 
 ## Configure
 
