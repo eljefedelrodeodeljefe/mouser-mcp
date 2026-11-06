@@ -24,12 +24,13 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use mouser::ExpectedOrder;
 use mouser::models::OrderRoot;
 use rmcp::model::{ElicitationSchema, JsonObject};
 use serde_json::{Value, json};
+use tokio::time::Instant;
 
 /// How long the user has to answer the form.
 pub const TTL: Duration = Duration::from_secs(10 * 60);
@@ -289,6 +290,29 @@ mod tests {
         assert_eq!(c.expected.order_total, 533.78);
         assert!(s.take(&id, "submit_order", &args(533.78)).is_err());
         assert!(s.take("order-99", "submit_order", &args(533.78)).is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_confirmation_expires_after_ten_minutes() {
+        let s = Store::default();
+        let id = s.open("submit_order", args(533.78), confirmed());
+        tokio::time::advance(TTL - Duration::from_secs(1)).await;
+        assert!(s.take(&id, "submit_order", &args(533.78)).is_ok());
+
+        let id = s.open("submit_order", args(533.78), confirmed());
+        tokio::time::advance(TTL).await;
+        let e = s.take(&id, "submit_order", &args(533.78)).err();
+        assert_eq!(e.as_deref(), Some("the confirmation expired; submit again"));
+
+        // an expired confirmation is dropped when the next one is asked for
+        let old = s.open("submit_order", args(533.78), confirmed());
+        tokio::time::advance(TTL).await;
+        s.open("submit_order", args(533.78), confirmed());
+        let e = s.take(&old, "submit_order", &args(533.78)).err();
+        assert_eq!(
+            e.as_deref(),
+            Some("unknown or already used confirmation; submit again")
+        );
     }
 
     #[test]

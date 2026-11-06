@@ -3,13 +3,14 @@
 
 use std::collections::VecDeque;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rust_decimal::Decimal;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tokio::sync::Mutex;
+use tokio::time::Instant;
 
 use crate::error::{Error, KeyKind, Result};
 use crate::models::*;
@@ -1131,5 +1132,43 @@ fn truncate(s: &str) -> String {
             end -= 1;
         }
         format!("{}…", &s[..end])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn limiter(per_minute: u32) -> Limiter {
+        Limiter {
+            per_minute,
+            calls: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_rate_limit_spaces_calls_over_a_rolling_minute() {
+        let l = limiter(2);
+        let start = Instant::now();
+        l.acquire().await;
+        tokio::time::advance(Duration::from_secs(10)).await;
+        l.acquire().await;
+        assert_eq!(
+            start.elapsed(),
+            Duration::from_secs(10),
+            "two calls fit a minute"
+        );
+        // The third waits until the first is a minute old, then the fourth for the second.
+        // Paused time moves only by the limiter's own sleeps; the guard stops a limiter that
+        // never sees the time move.
+        let third = tokio::time::timeout(Duration::from_secs(600), async {
+            l.acquire().await;
+            Instant::now()
+        })
+        .await
+        .expect("the third call is let through");
+        assert_eq!(third - start, Duration::from_secs(60));
+        l.acquire().await;
+        assert_eq!(start.elapsed(), Duration::from_secs(70));
     }
 }

@@ -25,6 +25,8 @@ rusty-money = { workspace = true }
 rust_decimal = { workspace = true }
 
 [dev-dependencies]
+# paused time (tokio::time::pause) for the rate limit and confirmation expiry tests
+tokio = { workspace = true, features = ["test-util"] }
 # the client side of MCP, to drive the server over an in-memory transport in tests
 rmcp = { version = "3.9", features = ["client"] }
 wiremock = { workspace = true }
