@@ -78,6 +78,27 @@ Ordering spends real money. These rules have no exceptions:
   of URLs (`reqwest::Error::without_url`) and replies are scrubbed of the key.
 - Tests never call the real Mouser API. Live checks go through `examples/probe.rs`, read-only.
 
+## Private data
+
+This repository is public. Nothing from the operator's own Mouser account or mail goes into
+it: not in code, comments, tests, fixtures, docs, commit messages, PR titles or PR bodies.
+
+- No names, addresses, email addresses, phone numbers, customer, order, invoice or tracking
+  numbers, VAT numbers, card digits, cart keys, or totals and dates of real orders.
+- No names, email addresses or quotes of people at Mouser or anywhere else. When support
+  said something worth documenting, state the behaviour in general terms ("ordering may need
+  setup on Mouser's side"), not who said it or how to reach them.
+- A real incident is a reason for a change, not a reference: describe the behaviour ("the
+  order shipped and was invoiced unpaid"), never the order it happened to.
+- Tests and examples use invented values: `0000` or `1234` for card digits, round or obviously
+  made-up totals, `DEMO-` order numbers, `example.com` addresses.
+- `tools/check_private_data.sh` runs on every commit and commit message: it refuses email
+  addresses other than placeholders and every term in a private denylist kept outside the
+  repo (`~/.config/mouser-mcp/private-terms`, one per line). Keep that list up to date with
+  your own details. It cannot catch everything, so the rule above still applies.
+- Check PR bodies by hand before posting; no hook sees them. Once something is pushed, a
+  force-push does not remove it from GitHub.
+
 ## Things to avoid
 
 - Don't add AI attribution to commits or PRs. No `Co-Authored-By` trailers for AI tools:
@@ -92,7 +113,8 @@ Ordering spends real money. These rules have no exceptions:
 ## Gates
 
 All commits must pass `prek run --all-files`: `cargo fmt`, `cargo clippy --all-targets -- -D
-warnings`, `cargo test --all`, `typos`, TOML/YAML validation, markdownlint.
+warnings`, `cargo test --all`, `typos`, TOML/YAML validation, markdownlint, and the
+private-data check (on commit messages too).
 
 Fix the lint where you can. Where a lint is wrong for one site, put `#[expect(clippy::lint,
 reason = "…")]` on that site; a bare `#[allow]` is still refused. A lint allowed across the

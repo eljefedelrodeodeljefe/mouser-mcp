@@ -40,11 +40,11 @@ From a session with the live Mouser API on 2026-11-06, for a two-delay-line test
    in-stock filter, checked each candidate's frequency range against 2–3 GHz and proposed
    ZX10R-2-183-S+ (resistive, DC–18 GHz, 2 in stock, €161.10), Fairview FMAT7467-6 pads
    (DC–12 GHz), Cinch 415-0033 cables in 1 m and 2 m, and Fairview ST0645 terminations:
-   €493.78 without the jumpers, all in stock. It flagged that the splitter's stock equalled
+   just under €500 without the jumpers, all in stock. It flagged that the splitter's stock equalled
    the quantity needed, and that the listings did not state two of the specs.
 3. `add_cart_items` put the parts in a cart. Mouser's own insert endpoint was seen dropping
    lines already in a cart; the tool writes the whole cart and reads it back instead.
-4. `query_order_options`, `preview_order` (€533.78 with €40.00 UPS, no VAT under reverse
+4. `query_order_options`, `preview_order` (the total with UPS shipping, no VAT under reverse
    charge on a company VAT number), `submit_order`. Claude Code showed the confirmation form,
    and the order was placed after the person accepted it with every line selected.
 

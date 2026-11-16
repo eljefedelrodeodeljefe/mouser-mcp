@@ -288,7 +288,7 @@ mod tests {
         Confirmed {
             expected: ExpectedOrder {
                 currency_code: "EUR".into(),
-                order_total: 533.78,
+                order_total: 250.00,
                 lines: vec![("139-ZX10R-2-183-S+".into(), 2)],
             },
             keys: vec!["line_01".into()],
@@ -298,39 +298,39 @@ mod tests {
     #[test]
     fn a_confirmation_is_single_use_and_bound_to_its_order() {
         let s = Store::default();
-        let id = s.open("submit_order", args(533.78), confirmed());
+        let id = s.open("submit_order", args(250.00), confirmed());
         assert!(s.take(&id, "submit_order", &args(999.0)).is_err());
         // a failed take consumed it: no second try with the right arguments either
-        assert!(s.take(&id, "submit_order", &args(533.78)).is_err());
-        let id = s.open("submit_order", args(533.78), confirmed());
+        assert!(s.take(&id, "submit_order", &args(250.00)).is_err());
+        let id = s.open("submit_order", args(250.00), confirmed());
         assert!(
-            s.take(&id, "submit_order_from_order", &args(533.78))
+            s.take(&id, "submit_order_from_order", &args(250.00))
                 .is_err()
         );
-        let id = s.open("submit_order", args(533.78), confirmed());
-        let c = s.take(&id, "submit_order", &args(533.78)).unwrap();
-        assert_eq!(c.expected.order_total, 533.78);
-        assert!(s.take(&id, "submit_order", &args(533.78)).is_err());
-        assert!(s.take("order-99", "submit_order", &args(533.78)).is_err());
+        let id = s.open("submit_order", args(250.00), confirmed());
+        let c = s.take(&id, "submit_order", &args(250.00)).unwrap();
+        assert_eq!(c.expected.order_total, 250.00);
+        assert!(s.take(&id, "submit_order", &args(250.00)).is_err());
+        assert!(s.take("order-99", "submit_order", &args(250.00)).is_err());
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_confirmation_expires_after_ten_minutes() {
         let s = Store::default();
-        let id = s.open("submit_order", args(533.78), confirmed());
+        let id = s.open("submit_order", args(250.00), confirmed());
         tokio::time::advance(TTL - Duration::from_secs(1)).await;
-        assert!(s.take(&id, "submit_order", &args(533.78)).is_ok());
+        assert!(s.take(&id, "submit_order", &args(250.00)).is_ok());
 
-        let id = s.open("submit_order", args(533.78), confirmed());
+        let id = s.open("submit_order", args(250.00), confirmed());
         tokio::time::advance(TTL).await;
-        let e = s.take(&id, "submit_order", &args(533.78)).err();
+        let e = s.take(&id, "submit_order", &args(250.00)).err();
         assert_eq!(e.as_deref(), Some("the confirmation expired; submit again"));
 
         // an expired confirmation is dropped when the next one is asked for
-        let old = s.open("submit_order", args(533.78), confirmed());
+        let old = s.open("submit_order", args(250.00), confirmed());
         tokio::time::advance(TTL).await;
-        s.open("submit_order", args(533.78), confirmed());
-        let e = s.take(&old, "submit_order", &args(533.78)).err();
+        s.open("submit_order", args(250.00), confirmed());
+        let e = s.take(&old, "submit_order", &args(250.00)).err();
         assert_eq!(
             e.as_deref(),
             Some("unknown or already used confirmation; submit again")
@@ -382,7 +382,7 @@ mod tests {
                 "Quantity": 2, "UnitPrice": 161.1, "ExtendedPrice": 322.2})
         };
         serde_json::from_value(json!({"Order": {
-            "CurrencyCode": "EUR", "MerchandiseTotal": 493.78, "TaxAmount": 0.0, "OrderTotal": 533.78,
+            "CurrencyCode": "EUR", "MerchandiseTotal": 210.00, "TaxAmount": 0.0, "OrderTotal": 250.00,
             "ShippingMethod": {"PrimaryMethod": "UPS Worldwide Express Saver", "PrimaryShippingRate": 40.0},
             "ShippingAddress": {"FirstName": "Robert", "LastName": "L", "City": "Berlin", "CountryCode": "DE"},
             "PaymentMethod": {"Name": "PayPal"},
@@ -395,7 +395,7 @@ mod tests {
         let f = form(&preview(2));
         assert!(!f.message.contains('\n'), "{}", f.message);
         for want in [
-            "Real order at Mouser: 533.78 EUR",
+            "Real order at Mouser: 250.00 EUR",
             "2 lines",
             "UPS Worldwide Express Saver 40.00",
             "tax 0.00",
@@ -428,7 +428,7 @@ mod tests {
         assert_eq!(
             place["oneOf"],
             json!([{"const": "dont_order", "title": "Don't order"},
-                {"const": "place", "title": "Place this order: 533.78 EUR, paid by PayPal"}])
+                {"const": "place", "title": "Place this order: 250.00 EUR, paid by PayPal"}])
         );
         assert_eq!(v["required"], json!(["lines", "place_order"]));
     }
