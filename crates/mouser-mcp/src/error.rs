@@ -37,7 +37,8 @@ pub fn tool_error(e: anyhow::Error) -> ErrorData {
         let code = match err {
             mouser::Error::InvalidArgument(_)
             | mouser::Error::Api(_)
-            | mouser::Error::OrderMismatch(_) => ErrorCode::INVALID_PARAMS,
+            | mouser::Error::OrderMismatch(_)
+            | mouser::Error::PaymentNotPossible(_) => ErrorCode::INVALID_PARAMS,
             mouser::Error::MissingKey(_) => ErrorCode::INVALID_REQUEST,
             _ => ErrorCode::INTERNAL_ERROR,
         };

@@ -328,7 +328,7 @@ fn order_request() -> OrderRequestRootType {
 
 fn order_reply(total: f64, qty: i64) -> Value {
     json!({"Order": {"Errors": [], "CurrencyCode": "EUR", "OrderTotal": total, "SubmitOrder": false,
-        "OrderLines": [{"MouserPartNumber": "139-ZFRSC-42-S+", "Quantity": qty}]}})
+        "PaymentMethod": {"Method": 1, "Name": "Credit Card"}, "OrderLines": [{"MouserPartNumber": "139-ZFRSC-42-S+", "Quantity": qty}]}})
 }
 
 fn expected(total: f64) -> ExpectedOrder {
@@ -361,6 +361,38 @@ async fn preview_never_submits_even_if_the_request_says_so() {
         .await
         .unwrap();
     assert_eq!(r.order.unwrap().order_total, Some(200.0));
+}
+
+#[tokio::test]
+async fn paypal_and_an_unnamed_payment_are_never_submitted() {
+    // The Order API records PayPal but never asks PayPal for the money: Mouser ships and
+    // invoices the order unpaid. A preview without a payment method leaves the choice to
+    // Mouser, which picks PayPal for an account that has only PayPal.
+    let paypal_by_code = json!({"Method": 1081, "Name": "Payment"});
+    let paypal_by_name = json!({"Method": 9, "Name": "PayPal"});
+    for payment in [Some(paypal_by_code), Some(paypal_by_name), None] {
+        let mut reply = order_reply(200.0, 2);
+        match &payment {
+            Some(p) => reply["Order"]["PaymentMethod"] = p.clone(),
+            None => {
+                reply["Order"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("PaymentMethod");
+            }
+        }
+        let server = MockServer::start().await;
+        mount_order(&server, false, reply, 1).await;
+        mount_order(&server, true, order_reply(200.0, 2), 0).await;
+        let e = client(&server, Some(500.0))
+            .submit_order(&order_request(), &expected(200.0))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(e, Error::PaymentNotPossible(_)),
+            "{payment:?}: {e:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -587,7 +619,7 @@ async fn placed_and_refused_orders_leave_an_audit_line() {
 async fn the_ceiling_holds_only_in_its_own_currency() {
     let gbp = |total: f64| {
         json!({"Order": {"Errors": [], "CurrencyCode": "GBP", "OrderTotal": total,
-            "OrderLines": [{"MouserPartNumber": "139-ZFRSC-42-S+", "Quantity": 2}]}})
+            "PaymentMethod": {"Method": 1, "Name": "Credit Card"}, "OrderLines": [{"MouserPartNumber": "139-ZFRSC-42-S+", "Quantity": 2}]}})
     };
     let mut request = order_request();
     request.order.as_mut().unwrap().currency_code = "GBP".into();

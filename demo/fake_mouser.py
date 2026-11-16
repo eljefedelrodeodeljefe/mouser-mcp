@@ -50,7 +50,7 @@ SYNONYMS = {
 }
 BY_MOUSER = {v[0].lower(): k for k, v in PARTS.items()}
 SHIPPING = [(65, "UPS Worldwide Express Saver", 40.0), (21, "DHL International Express", 40.0)]
-PAYMENT = [(1081, "PayPal")]
+PAYMENT = [(30, "Mastercard ending in 0000- Exp  12/30"), (1081, "PayPal")]
 # An invented company, with an address and phone that look like a real order's.
 ADDRESS = {
     "AddressLocationTypeID": 2, "FirstName": "Ada", "LastName": "Lovelace", "Company": "Analytical Engines GmbH",

@@ -145,7 +145,7 @@ pub fn form(preview: &OrderRoot) -> Form {
         PLACE.into(),
         json!({"type": "boolean",
             "title": format!("Place this order: {} {cur}", money(o.order_total)),
-            "description": "A real purchase, charged to the payment method above",
+            "description": "A real purchase, paid with the payment method above",
             "default": false}),
     );
     let schema = serde_json::from_value(json!({

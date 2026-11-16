@@ -51,6 +51,12 @@ pub enum Error {
     #[error("order not submitted: {0}")]
     OrderMismatch(String),
 
+    /// `submit_order` refused: the order's payment method cannot be paid through the Order API.
+    /// PayPal needs the buyer to approve the payment at PayPal, a step the API has no part of:
+    /// Mouser records the order as PayPal, ships it and invoices it unpaid.
+    #[error("order not submitted: {0}")]
+    PaymentNotPossible(String),
+
     /// The call that places an order (`SubmitOrder: true`) failed in transport after it was
     /// sent: Mouser may have placed the order. Look in the order history before submitting
     /// again; a blind retry can order twice. The source is the transport error.

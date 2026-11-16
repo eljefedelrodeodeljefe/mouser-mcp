@@ -266,7 +266,9 @@ pub struct OrderChoice {
     pub currency_code: String,
     #[schemars(description = "Shipping method Code from query_order_options (PrimaryShipping)")]
     pub shipping_code: Option<i64>,
-    #[schemars(description = "Payment Method from query_order_options, e.g. 1081 for PayPal")]
+    #[schemars(
+        description = "Payment Method from query_order_options: a saved card or invoice terms. PayPal (1081) previews but cannot be submitted: the API never asks PayPal for the money"
+    )]
     pub payment_method: Option<i64>,
 }
 

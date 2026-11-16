@@ -566,7 +566,7 @@ impl MouserServer {
     }
 
     #[tool(
-        description = "PLACE AN ORDER at Mouser — a real purchase (POST /api/v1/order with SubmitOrder true). Same arguments as preview_order plus `total`, the preview's OrderTotal. Previews again; if the total matches and is within MOUSER_MAX_ORDER_TOTAL, the user gets a confirmation form from the MCP client (elicitation): a one-line summary, \"Order lines\" (every line, all selected) and \"Place this order\". The order is placed only if they accept with every line selected and the box ticked, and Mouser's final preview still has exactly the lines they confirmed. Clients without elicitation cannot order. Requires MOUSER_ALLOW_ORDERS"
+        description = "PLACE AN ORDER at Mouser — a real purchase (POST /api/v1/order with SubmitOrder true). Same arguments as preview_order plus `total`, the preview's OrderTotal. Previews again; if the total matches and is within MOUSER_MAX_ORDER_TOTAL, the user gets a confirmation form from the MCP client (elicitation): a one-line summary, \"Order lines\" (every line, all selected) and \"Place this order\". The order is placed only if they accept with every line selected and the box ticked, and Mouser's final preview still has exactly the lines they confirmed. Clients without elicitation cannot order. PayPal is refused: the API never asks PayPal for the money, so Mouser would ship and invoice the order unpaid. Requires MOUSER_ALLOW_ORDERS"
     )]
     async fn submit_order(
         &self,
@@ -610,7 +610,7 @@ impl MouserServer {
     }
 
     #[tool(
-        description = "PLACE A RE-ORDER of an earlier order — a real purchase (POST /api/v1/order/CreateFromOrder with SubmitOrder true). Same arguments as preview_order_from_order plus `total`, its OrderTotal; the same confirmation form as submit_order. Requires MOUSER_ALLOW_ORDERS"
+        description = "PLACE A RE-ORDER of an earlier order — a real purchase (POST /api/v1/order/CreateFromOrder with SubmitOrder true). Same arguments as preview_order_from_order plus `total`, its OrderTotal; the same confirmation form and payment rules (no PayPal) as submit_order. Requires MOUSER_ALLOW_ORDERS"
     )]
     async fn submit_order_from_order(
         &self,
@@ -905,7 +905,7 @@ mod tests {
 
     async fn mount_order(server: &MockServer, submit: bool, times: impl Into<wiremock::Times>) {
         let reply = json!({"Order": {"Errors": [], "CurrencyCode": "EUR", "OrderTotal": 200.0,
-            "MerchandiseTotal": 174.2, "SubmitOrder": submit, "OrderId": "placed-1",
+            "MerchandiseTotal": 174.2, "SubmitOrder": submit, "OrderId": "placed-1", "PaymentMethod": {"Method": 2, "Name": "Credit Card"},
             "OrderLines": [{"MouserPartNumber": "139-ZFRSC-42-S+", "Quantity": 2, "UnitPrice": 87.1, "ExtendedPrice": 174.2}]}});
         Mock::given(method("POST"))
             .and(path("/api/v1/order"))
@@ -1134,15 +1134,17 @@ mod tests {
     async fn mount_reorder(server: &MockServer, submit: bool, times: impl Into<wiremock::Times>) {
         use wiremock::matchers::query_param;
         let reply = json!({"Order": {"Errors": [], "CurrencyCode": "EUR", "OrderTotal": 200.0,
-            "SubmitOrder": submit, "OrderID": "placed-2",
+            "SubmitOrder": submit, "OrderID": "placed-2", "PaymentMethod": {"Method": 2, "Name": "Credit Card"},
             "OrderLines": [{"MouserPartNumber": "139-ZFRSC-42-S+", "Quantity": 2, "UnitPrice": 87.1, "ExtendedPrice": 174.2}]}});
         // Exactly this body: nothing the model sent beyond the choices reaches Mouser.
         Mock::given(method("POST"))
             .and(path("/api/v1/order/CreateFromOrder"))
             .and(query_param("orderNumber", "42"))
             .and(query_param("currencyCode", "EUR"))
-            .and(body_json(json!({"Order": {"CartKey": "cart-1", "CurrencyCode": "EUR",
-                "PrimaryShipping": {"Code": 7}, "Payment": {"Method": 1081}, "SubmitOrder": submit}})))
+            .and(body_json(
+                json!({"Order": {"CartKey": "cart-1", "CurrencyCode": "EUR",
+                "PrimaryShipping": {"Code": 7}, "Payment": {"Method": 2}, "SubmitOrder": submit}}),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(reply))
             .expect(times)
             .mount(server)
@@ -1155,12 +1157,12 @@ mod tests {
         mount_reorder(&mouser, false, 1..).await;
         mount_reorder(&mouser, true, 1).await;
         let hijack = json!({"CartKey": "cart-1", "CurrencyCode": "EUR",
-            "PrimaryShipping": {"Code": 7}, "Payment": {"Method": 1081},
+            "PrimaryShipping": {"Code": 7}, "Payment": {"Method": 2},
             "ShippingAddress": {"FirstName": "Robert", "LastName": "L", "AddressOne": "Elsewhere 1",
                 "City": "Berlin", "CountryCode": "DE", "PhoneNumber": "0"},
             "PrimaryFreightAccount": {"Number": "x"}, "IECCode": "x"});
         let args = json!({"order_number": 42, "cart_key": "cart-1", "currency_code": "EUR",
-            "shipping_code": 7, "payment_method": 1081, "total": 200.0, "order": hijack});
+            "shipping_code": 7, "payment_method": 2, "total": 200.0, "order": hijack});
         let (r, shown) = call_through_mcp(
             &mouser,
             ProtocolVersion::V_2025_06_18,

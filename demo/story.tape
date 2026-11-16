@@ -56,7 +56,7 @@ Enter
 Sleep 20s
 
 # Scene 4: the order, confirmed by the person in the form
-Type "Order it with UPS Express Saver and PayPal."
+Type "Order it with UPS Express Saver and the Mastercard."
 Sleep 600ms
 Enter
 Sleep 45s

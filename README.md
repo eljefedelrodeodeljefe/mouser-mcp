@@ -85,7 +85,7 @@ person, and the model cannot answer it:
 
 ```text
 MCP server "mouser" requests your input
-Real order at Mouser: 635.20 EUR · 5 lines · merchandise 493.78 · UPS Worldwide Express Saver 40.00 · tax 101.42 · PayPal · to Ada Lovelace Berlin DE
+Real order at Mouser: 635.20 EUR · 5 lines · merchandise 493.78 · UPS Worldwide Express Saver 40.00 · tax 101.42 · Mastercard ending in 0000- Exp  12/30 · to Ada Lovelace Berlin DE
 ❯ ✔ Order lines: ▾
       ❯ ☒ "2 × ZX10R-2-183-S+  161.10 each  = 322.20 EUR"
         ☒ "2 × FMAT7467-6  53.10 each  = 106.20 EUR"
@@ -94,12 +94,13 @@ Real order at Mouser: 635.20 EUR · 5 lines · merchandise 493.78 · UPS Worldwi
         ☒ "1 × 415-0033-M2.0  22.68 each  = 22.68 EUR"
       Everything in this order. Deselect any line to stop the order.
   ✔ Place this order: 635.20 EUR: ☐
-      A real purchase, charged to the payment method above
+      A real purchase, paid with the payment method above
   Accept    Decline
 Esc to cancel · ↑/↓ to navigate · Backspace to unset · Space to toggle
 ```
 
-An order takes four steps: `query_order_options` (shipping and payment codes),
+An order takes four steps: `query_order_options` (shipping and payment codes; a saved card
+or invoice terms, not PayPal),
 `preview_order` (`cart_key`, `currency_code`, `shipping_code`, `payment_method`),
 `submit_order` (the same, plus the preview's `total`), and the user's answer in the form.
 A re-order of an earlier order takes the same arguments plus its `order_number`
@@ -162,7 +163,13 @@ chmod 600 ~/.config/mouser/*-api-key
   example); `price_bom` reports them per currency.
 - **Ordering uses the account's defaults.** Shipping address, payment methods (PayPal, card,
   invoice terms) and VAT details come from your Mouser account; `query_order_options` lists
-  what it offers. With a validated EU VAT number the preview can show no tax (reverse
+  what it offers.
+- **PayPal cannot be ordered through the API.** Mouser's Order API accepts PayPal as the
+  payment method but never sends you to PayPal to approve the payment, so Mouser places the
+  order, ships it and invoices it unpaid. `submit_order` refuses PayPal, and a preview that
+  names no payment method. Save a credit card in your Mouser account (or get invoice terms)
+  to order here, or order on mouser.com to pay with PayPal. `preview_order` still works with
+  PayPal, for prices, shipping and tax. With a validated EU VAT number the preview can show no tax (reverse
   charge). Mouser fills in the order type (for example `Rush`: ship what is in stock first).
 - **`MOUSER_MAX_ORDER_TOTAL` needs its currency.** `"500 EUR"`, not `500`: a bare number
   stops the server from starting. Orders are placed only in the ceiling's
