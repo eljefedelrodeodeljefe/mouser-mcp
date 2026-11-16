@@ -101,7 +101,8 @@ Esc to cancel · ↑/↓ to navigate · Backspace to unset · Space to toggle
 
 An order takes four steps: `query_order_options` (shipping and payment codes; a saved card
 or invoice terms, not PayPal),
-`preview_order` (`cart_key`, `currency_code`, `shipping_code`, `payment_method`),
+`preview_order` (`cart_key`, `currency_code`, `shipping_code`, `payment_method`, and
+`card_last_four` for a saved card),
 `submit_order` (the same, plus the preview's `total`), and the user's answer in the form.
 A re-order of an earlier order takes the same arguments plus its `order_number`
 (`preview_order_from_order`, `submit_order_from_order`). Neither takes an address or freight

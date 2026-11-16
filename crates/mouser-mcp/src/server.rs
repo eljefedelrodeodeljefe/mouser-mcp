@@ -556,7 +556,7 @@ impl MouserServer {
     }
 
     #[tool(
-        description = "Preview an order of a cart: lines, shipping, tax and OrderTotal, as Mouser would place it (POST /api/v1/order with SubmitOrder false — never places an order). Takes cart_key, currency_code and the shipping_code and payment_method that query_order_options lists"
+        description = "Preview an order of a cart: lines, shipping, tax and OrderTotal, as Mouser would place it (POST /api/v1/order with SubmitOrder false — never places an order). Takes cart_key, currency_code and the shipping_code and payment_method that query_order_options lists, plus card_last_four for a saved card"
     )]
     async fn preview_order(
         &self,

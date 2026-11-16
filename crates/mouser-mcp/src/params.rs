@@ -270,6 +270,10 @@ pub struct OrderChoice {
         description = "Payment Method from query_order_options: a saved card or invoice terms. PayPal (1081) previews but cannot be submitted: the API never asks PayPal for the money"
     )]
     pub payment_method: Option<i64>,
+    #[schemars(
+        description = "CreditCardLastFourDigits of the saved card, as query_order_options lists it next to its Method. Required when payment_method is a card"
+    )]
+    pub card_last_four: Option<String>,
 }
 
 impl OrderChoice {
@@ -283,6 +287,7 @@ impl OrderChoice {
             }),
             payment: self.payment_method.map(|m| PaymentTypeRequest {
                 method: m,
+                credit_card_last_four_digits: self.card_last_four.clone(),
                 ..Default::default()
             }),
             ..Default::default()
@@ -337,4 +342,22 @@ pub struct CartFromOrderParams {
     pub country_code: Option<String>,
     #[schemars(description = "currencyCode")]
     pub currency_code: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_saved_card_travels_with_its_last_four_digits() {
+        let c: OrderChoice = serde_json::from_value(json!({"cart_key": "cart-1",
+            "currency_code": "EUR", "shipping_code": 65, "payment_method": 30,
+            "card_last_four": "1234"}))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(c.request()).unwrap()["Payment"],
+            json!({"Method": 30, "CreditCardLastFourDigits": "1234"})
+        );
+    }
 }
