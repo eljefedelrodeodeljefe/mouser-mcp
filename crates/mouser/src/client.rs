@@ -1058,7 +1058,7 @@ fn check_payment(o: &crate::models::Order) -> Result<()> {
             .is_some_and(|n| n.to_ascii_lowercase().contains("paypal"));
     if paypal {
         return Err(Error::PaymentNotPossible(
-            "PayPal cannot be paid through the Mouser Order API: the order would be placed, shipped and invoiced unpaid, because nobody approves the payment at PayPal. Order on mouser.com to pay with PayPal, or use a saved card or invoice terms if query_order_options lists one".into(),
+            "PayPal cannot be paid through the Mouser Order API: the order would be placed, shipped and invoiced unpaid, because nobody approves the payment at PayPal. Order on mouser.com to pay with PayPal, or use a saved card or invoice terms if query_order_options lists one.".into(),
         ));
     }
     Ok(())

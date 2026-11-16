@@ -8,6 +8,14 @@
 agent finds the parts and prepares the order; the person places it in a confirmation form
 that the model does not see.**
 
+> [!WARNING]
+> **An order placed through Mouser's Order API can go unpaid, silently.** Mouser accepts the
+> order, confirms it, ships it and invoices it, but the payment method on the order (PayPal
+> or a saved card) is never charged. The API reply shows no error. Weeks later the invoice
+> comes back as unpaid, with payment reminders. Ordering through the API may need setup on
+> Mouser's side for your Order API key: contact Mouser before your first order here, and check
+> that its invoice was paid.
+
 ![Claude Code finds in-stock alternatives for a backordered RF BOM at Mouser](demo/search.gif)
 
 A Rust SDK (`mouser`) and an [MCP](https://modelcontextprotocol.io) server (`mouser-mcp`) for
@@ -103,8 +111,9 @@ Real order at Mouser: 635.20 EUR · 5 lines · merchandise 493.78 · UPS Worldwi
 Esc to cancel · ↑/↓ to navigate · Backspace to unset · Space to toggle
 ```
 
-An order takes four steps: `query_order_options` (shipping and payment codes; a saved card
-or invoice terms, not PayPal),
+Read the warning at the top first: an order can be accepted and never paid. An order takes
+four steps: `query_order_options` (shipping and payment codes; a saved card or invoice
+terms, not PayPal),
 `preview_order` (`cart_key`, `currency_code`, `shipping_code`, `payment_method`, and
 `card_last_four` for a saved card),
 `submit_order` (the same, plus the preview's `total`), and the user's answer in the form.
@@ -169,13 +178,18 @@ chmod 600 ~/.config/mouser/*-api-key
 - **Ordering uses the account's defaults.** Shipping address, payment methods (PayPal, card,
   invoice terms) and VAT details come from your Mouser account; `query_order_options` lists
   what it offers.
+- **An accepted order is not a paid order.** Mouser can accept, ship and invoice an order
+  placed here without charging its payment method, and say nothing about it in the reply.
+  Ordering may need setup on Mouser's side for your Order API key; contact Mouser before the
+  first order, and check its invoice. A saved card can also be declined outright.
 - **PayPal cannot be ordered through the API.** Mouser's Order API accepts PayPal as the
   payment method but never sends you to PayPal to approve the payment, so Mouser places the
   order, ships it and invoices it unpaid. `submit_order` refuses PayPal, and a preview that
-  names no payment method. Save a credit card in your Mouser account (or get invoice terms)
-  to order here, or order on mouser.com to pay with PayPal. `preview_order` still works with
-  PayPal, for prices, shipping and tax. With a validated EU VAT number the preview can show no tax (reverse
-  charge). Mouser fills in the order type (for example `Rush`: ship what is in stock first).
+  names no payment method. Use a saved credit card (or invoice terms) to order here, or
+  order on mouser.com to pay with PayPal. `preview_order` still works with PayPal, for
+  prices, shipping and tax. With a validated EU VAT number the preview can show no tax
+  (reverse charge). Mouser fills in the order type (for example `Rush`: ship what is in
+  stock first).
 - **`MOUSER_MAX_ORDER_TOTAL` needs its currency.** `"500 EUR"`, not `500`: a bare number
   stops the server from starting. Orders are placed only in the ceiling's
   currency; to order in another, change the ceiling.
