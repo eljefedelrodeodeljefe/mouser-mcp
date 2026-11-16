@@ -61,11 +61,13 @@ own gate, and every order needs the person's confirmation:
    ([elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation)).
    - The form has a one-line summary (total, shipping, tax, payment, ship-to), "Order
      lines", every line with quantity, part, unit price and line total, all selected, and
-     "Place this order", unticked. Clients step through the list with the keyboard.
-   - Only an accepted form with every line still selected and the box ticked places the
-     order, and only if Mouser's final preview still has the lines confirmed. Deselecting a
-     line, declining, cancelling or not answering places nothing. A client that cannot show
-     forms cannot order.
+     "Decision", a required choice with no default between "Don't order" and "Place this
+     order: 635.20 EUR, paid by Mastercard". Clients step through the list with the
+     keyboard, and do not accept the form until a decision is chosen.
+   - Only an accepted form with every line still selected and "Place this order" chosen
+     places the order, and only if Mouser's final preview still has the lines confirmed.
+     Deselecting a line, declining, cancelling or not answering places nothing. A client
+     that cannot show forms cannot order.
    - A confirmation is single use, expires after ten minutes and is bound to the exact
      arguments of the call, so an answer cannot be replayed onto another order. On protocol
      `2026-07-28` the form travels as an `InputRequiredResult` (multi round-trip) and the
@@ -93,8 +95,10 @@ Real order at Mouser: 635.20 EUR · 5 lines · merchandise 493.78 · UPS Worldwi
         ☒ "1 × 415-0033-M1.0  17.44 each  = 17.44 EUR"
         ☒ "1 × 415-0033-M2.0  22.68 each  = 22.68 EUR"
       Everything in this order. Deselect any line to stop the order.
-  ✔ Place this order: 635.20 EUR: ☐
-      A real purchase, paid with the payment method above
+  Decision: (required)
+      ○ Don't order
+      ○ Place this order: 635.20 EUR, paid by Mastercard ending in 0000- Exp  12/30
+      A real purchase. Choose one
   Accept    Decline
 Esc to cancel · ↑/↓ to navigate · Backspace to unset · Space to toggle
 ```

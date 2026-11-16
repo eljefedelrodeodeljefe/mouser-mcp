@@ -5,10 +5,13 @@
 //! it.
 //!
 //! The form has a one-line summary (total, shipping, payment, ship-to) and two fields: "Order
-//! lines", a multi-select list with one option per line, all selected, and "Place this
-//! order", a checkbox, unticked. Clients step through the list with the keyboard, so every
-//! line is in reach however long the order is. Only an accepted form with every line still
-//! selected and the box ticked confirms; deselecting a line refuses the order.
+//! lines", a multi-select list with one option per line, all selected, and "Decision", a
+//! required single choice with no default between "Don't order" and "Place this order: <total>,
+//! paid by <payment>". Clients step through the list with the keyboard, so every line is in
+//! reach however long the order is. A checkbox was easy to miss below a long list; a required
+//! choice cannot be skipped, because the client does not accept the form without it. Only an
+//! accepted form with every line still selected and "Place this order" chosen confirms;
+//! deselecting a line refuses the order.
 //!
 //! Two protocol paths:
 //!
@@ -43,8 +46,14 @@ pub const INPUT_KEY: &str = "confirm_order";
 /// order).
 pub const LINES: &str = "lines";
 
-/// The checkbox that places the order.
+/// The required choice that places the order (or not). Its key sorts after [`LINES`].
 pub const PLACE: &str = "place_order";
+
+/// The [`PLACE`] option that places the order. Any other answer places nothing.
+pub const PLACE_YES: &str = "place";
+
+/// The [`PLACE`] option that places nothing.
+pub const PLACE_NO: &str = "dont_order";
 
 fn money(v: Option<f64>) -> String {
     v.map_or_else(|| "?".into(), |v| format!("{v:.2}"))
@@ -59,7 +68,7 @@ pub struct Form {
 }
 
 /// Builds the form: a one-line message, the lines as a multi-select list, all selected, and
-/// an unticked "Place this order".
+/// the required "Decision" with no default.
 pub fn form(preview: &OrderRoot) -> Form {
     let o = preview.order.clone().unwrap_or_default();
     let cur = o.currency_code.as_deref().unwrap_or("?");
@@ -141,17 +150,27 @@ pub fn form(preview: &OrderRoot) -> Form {
             "description": "Everything in this order. Deselect any line to stop the order.",
             "items": {"anyOf": options}, "default": keys}),
     );
+    let paid_by = o
+        .payment_method
+        .as_ref()
+        .and_then(|p| p.name.as_deref())
+        .map(|n| format!(", paid by {n}"))
+        .unwrap_or_default();
+    // No default: the client asks for a choice before it accepts the form.
     props.insert(
         PLACE.into(),
-        json!({"type": "boolean",
-            "title": format!("Place this order: {} {cur}", money(o.order_total)),
-            "description": "A real purchase, paid with the payment method above",
-            "default": false}),
+        json!({"type": "string", "title": "Decision",
+        "description": "A real purchase. Choose one",
+        "oneOf": [
+            {"const": PLACE_NO, "title": "Don't order"},
+            {"const": PLACE_YES,
+                "title": format!("Place this order: {} {cur}{paid_by}", money(o.order_total))},
+        ]}),
     );
     let schema = serde_json::from_value(json!({
         "type": "object", "properties": props, "required": [LINES, PLACE],
     }))
-    // A titled multi-select and a boolean, built from strings: always a valid schema.
+    // A titled multi-select and a titled single select, built from strings: always valid.
     .expect("order form schema");
     Form {
         message,
@@ -168,7 +187,8 @@ pub enum Answer {
 }
 
 /// Reads an elicitation result (`{"action": …, "content": {…}}`): only an accepted form with
-/// every one of `keys` still selected in [`LINES`] and [`PLACE`] ticked confirms.
+/// every one of `keys` still selected in [`LINES`] and [`PLACE_YES`] chosen in [`PLACE`]
+/// confirms.
 pub fn answer(response: Option<&Value>, keys: &[String]) -> Answer {
     let Some(r) = response else {
         return Answer::Refused("no answer to the confirmation form".into());
@@ -192,9 +212,10 @@ pub fn answer(response: Option<&Value>, keys: &[String]) -> Answer {
     if !dropped.is_empty() {
         return Answer::Refused(format!("the user deselected {}", dropped.join(", ")));
     }
-    match content.and_then(|c| c.get(PLACE)).and_then(Value::as_bool) {
-        Some(true) => Answer::Confirmed,
-        _ => Answer::Refused("the user did not tick \"Place this order\"".into()),
+    match content.and_then(|c| c.get(PLACE)).and_then(Value::as_str) {
+        Some(PLACE_YES) => Answer::Confirmed,
+        Some(PLACE_NO) => Answer::Refused("the user chose \"Don't order\"".into()),
+        _ => Answer::Refused("the user did not choose \"Place this order\"".into()),
     }
 }
 
@@ -317,28 +338,34 @@ mod tests {
     }
 
     #[test]
-    fn only_an_accepted_form_with_every_line_and_the_box_confirms() {
+    fn only_an_accepted_form_with_every_line_and_place_chosen_confirms() {
         let keys: Vec<String> = vec!["line_01".into(), "line_02".into()];
         let a = |v: Value| answer(Some(&v), &keys);
-        let all = json!({"lines": ["line_02", "line_01"], "place_order": true});
+        let all = json!({"lines": ["line_02", "line_01"], "place_order": "place"});
         assert_eq!(
             a(json!({"action": "accept", "content": all})),
             Answer::Confirmed
         );
         assert_eq!(
-            a(json!({"action": "accept", "content": {"lines": ["line_01"], "place_order": true}})),
+            a(
+                json!({"action": "accept", "content": {"lines": ["line_01"], "place_order": "place"}})
+            ),
             Answer::Refused("the user deselected line_02".into())
         );
         assert_eq!(
             a(
-                json!({"action": "accept", "content": {"lines": ["line_01", "line_02"], "place_order": false}})
+                json!({"action": "accept", "content": {"lines": ["line_01", "line_02"], "place_order": "dont_order"}})
             ),
-            Answer::Refused("the user did not tick \"Place this order\"".into())
+            Answer::Refused("the user chose \"Don't order\"".into())
         );
         for v in [
-            json!({"action": "accept", "content": {"place_order": true}}),
-            json!({"action": "accept", "content": {"lines": "line_01,line_02", "place_order": true}}),
+            json!({"action": "accept", "content": {"place_order": "place"}}),
+            json!({"action": "accept", "content": {"lines": "line_01,line_02", "place_order": "place"}}),
             json!({"action": "accept"}),
+            // the old checkbox answer, and a choice that is not an option
+            json!({"action": "accept", "content": {"lines": ["line_01", "line_02"], "place_order": true}}),
+            json!({"action": "accept", "content": {"lines": ["line_01", "line_02"], "place_order": "yes"}}),
+            json!({"action": "accept", "content": {"lines": ["line_01", "line_02"]}}),
             json!({"action": "decline"}),
             json!({"action": "cancel", "content": all}),
             json!({"content": all}),
@@ -364,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn the_form_has_a_one_line_summary_a_list_of_lines_and_one_box() {
+    fn the_form_has_a_one_line_summary_a_list_of_lines_and_one_required_choice() {
         let f = form(&preview(2));
         assert!(!f.message.contains('\n'), "{}", f.message);
         for want in [
@@ -392,8 +419,17 @@ mod tests {
             lines["items"]["anyOf"][0],
             json!({"const": "line_01", "title": "2 × PART-1  161.10 each  = 322.20 EUR  (WP6)"})
         );
-        assert_eq!(v["properties"]["place_order"]["type"], "boolean");
-        assert_eq!(v["properties"]["place_order"]["default"], false);
+        let place = &v["properties"]["place_order"];
+        assert_eq!(place["type"], "string");
+        assert!(
+            place.get("default").is_none(),
+            "a choice, not a default: {place}"
+        );
+        assert_eq!(
+            place["oneOf"],
+            json!([{"const": "dont_order", "title": "Don't order"},
+                {"const": "place", "title": "Place this order: 533.78 EUR, paid by PayPal"}])
+        );
         assert_eq!(v["required"], json!(["lines", "place_order"]));
     }
 

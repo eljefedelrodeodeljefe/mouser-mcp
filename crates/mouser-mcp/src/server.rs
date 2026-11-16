@@ -566,7 +566,7 @@ impl MouserServer {
     }
 
     #[tool(
-        description = "PLACE AN ORDER at Mouser — a real purchase (POST /api/v1/order with SubmitOrder true). Same arguments as preview_order plus `total`, the preview's OrderTotal. Previews again; if the total matches and is within MOUSER_MAX_ORDER_TOTAL, the user gets a confirmation form from the MCP client (elicitation): a one-line summary, \"Order lines\" (every line, all selected) and \"Place this order\". The order is placed only if they accept with every line selected and the box ticked, and Mouser's final preview still has exactly the lines they confirmed. Clients without elicitation cannot order. PayPal is refused: the API never asks PayPal for the money, so Mouser would ship and invoice the order unpaid. Requires MOUSER_ALLOW_ORDERS"
+        description = "PLACE AN ORDER at Mouser — a real purchase (POST /api/v1/order with SubmitOrder true). Same arguments as preview_order plus `total`, the preview's OrderTotal. Previews again; if the total matches and is within MOUSER_MAX_ORDER_TOTAL, the user gets a confirmation form from the MCP client (elicitation): a one-line summary, \"Order lines\" (every line, all selected) and \"Decision\", a required choice between \"Don't order\" and \"Place this order\". The order is placed only if they accept with every line selected and \"Place this order\" chosen, and Mouser's final preview still has exactly the lines they confirmed. Clients without elicitation cannot order. PayPal is refused: the API never asks PayPal for the money, so Mouser would ship and invoice the order unpaid. Requires MOUSER_ALLOW_ORDERS"
     )]
     async fn submit_order(
         &self,
@@ -816,7 +816,7 @@ mod tests {
     #[derive(Clone, Debug)]
     struct Reply {
         action: ElicitationAction,
-        /// tick "Place this order"
+        /// choose "Place this order" (else "Don't order")
         place: bool,
         /// keep every line selected
         lines: bool,
@@ -879,7 +879,7 @@ mod tests {
                 tokio::time::pause();
                 std::future::pending::<()>().await;
             }
-            // A user who keeps (or drops one of) the listed lines and ticks (or not) the box.
+            // A user who keeps (or drops one of) the listed lines and chooses to order (or not).
             let mut content = serde_json::Map::new();
             for (key, field) in schema["properties"].as_object().unwrap() {
                 let answer = match field["type"].as_str() {
@@ -895,7 +895,7 @@ mod tests {
                         }
                         Value::Array(all)
                     }
-                    _ => json!(r.place),
+                    _ => json!(if r.place { "place" } else { "dont_order" }),
                 };
                 content.insert(key.clone(), answer);
             }
@@ -1047,7 +1047,11 @@ mod tests {
                 "2 × 139-ZFRSC-42-S+  87.10 each  = 174.20 EUR"
             );
             assert_eq!(schema["properties"]["lines"]["default"], json!(["line_01"]));
-            assert_eq!(schema["properties"]["place_order"]["default"], false);
+            assert_eq!(
+                schema["properties"]["place_order"]["oneOf"][1]["const"],
+                "place"
+            );
+            assert!(schema["properties"]["place_order"].get("default").is_none());
         }
     }
 
