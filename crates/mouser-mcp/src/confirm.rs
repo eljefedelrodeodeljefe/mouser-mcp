@@ -6,8 +6,8 @@
 //!
 //! The form has a one-line summary (total, shipping, payment, ship-to) and two fields: "Order
 //! lines", a multi-select list with one option per line, all selected, and "Decision", a
-//! required single choice with no default between "Don't order" and "Place this order: <total>,
-//! paid by <payment>". Clients step through the list with the keyboard, so every line is in
+//! required single choice with no default between "Don't order" and "Place this order: `<total>`,
+//! paid by `<payment>`". Clients step through the list with the keyboard, so every line is in
 //! reach however long the order is. A checkbox was easy to miss below a long list; a required
 //! choice cannot be skipped, because the client does not accept the form without it. Only an
 //! accepted form with every line still selected and "Place this order" chosen confirms;

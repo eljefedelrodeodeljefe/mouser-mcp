@@ -3,6 +3,11 @@
 [advisories]
 # RustSec advisories, including unmaintained and yanked crates.
 yanked = "deny"
+ignore = [
+  # chrono unmaintained (2026-11): only through rmcp and schemars, never used here directly;
+  # drop this once both move off it.
+  { id = "RUSTSEC-2026-0543", reason = "transitive via rmcp and schemars; not used directly" },
+]
 
 [licenses]
 # Permissive licences only: everything here is compatible with shipping MIT binaries.
