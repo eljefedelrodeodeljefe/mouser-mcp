@@ -987,6 +987,7 @@ impl Client {
         let total = o
             .order_total
             .ok_or_else(|| Error::Decode("preview without OrderTotal".into()))?;
+        check_payment(o)?;
         if !currency.eq_ignore_ascii_case(&expected.currency_code) {
             return Err(Error::OrderMismatch(format!(
                 "currency is {currency}, confirmed {}",
@@ -1034,6 +1035,33 @@ impl Client {
         }
         Ok(())
     }
+}
+
+/// Mouser's code for PayPal in `Payment.Method` (Order OptionsQuery lists it as such).
+pub const PAYPAL_METHOD: i64 = 1081;
+
+/// An order can be placed through the API only with a payment Mouser can collect without the
+/// buyer: a saved card or invoice terms. PayPal needs the buyer to approve the payment at
+/// PayPal, which the Order API never asks for; Mouser then ships and invoices the order
+/// unpaid. A preview that names no payment method is refused too:
+/// Mouser would choose one, and for an account with only PayPal it chooses PayPal.
+fn check_payment(o: &crate::models::Order) -> Result<()> {
+    let Some(p) = o.payment_method.as_ref() else {
+        return Err(Error::PaymentNotPossible(
+            "the preview names no payment method: pass payment_method from query_order_options"
+                .into(),
+        ));
+    };
+    let paypal = p.method == Some(PAYPAL_METHOD)
+        || p.name
+            .as_deref()
+            .is_some_and(|n| n.to_ascii_lowercase().contains("paypal"));
+    if paypal {
+        return Err(Error::PaymentNotPossible(
+            "PayPal cannot be paid through the Mouser Order API: the order would be placed, shipped and invoiced unpaid, because nobody approves the payment at PayPal. Order on mouser.com to pay with PayPal, or use a saved card or invoice terms if query_order_options lists one.".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// The audit line of a placed order: its id, total and currency (Mouser's reply, else what
@@ -1097,11 +1125,17 @@ fn check_part_field(v: Option<&str>) -> Result<()> {
 /// Mouser reports failures with HTTP 200 and an `Errors` list, at the top level or inside
 /// `Order` / `OrderInitialize`.
 fn check_errors(v: &Value) -> Result<()> {
-    let lists = [
+    let mut lists = vec![
         v.get("Errors"),
         v.pointer("/Order/Errors"),
         v.pointer("/OrderInitialize/Errors"),
     ];
+    // An order's parts carry their own `Error` block (PaymentMethod, ShippingMethod, the
+    // addresses). Mouser reports a bad payment there and answers with an empty order and
+    // `Order.Errors` empty, so a preview without lines and with a total of 0 would pass.
+    if let Some(order) = v.get("Order").and_then(Value::as_object) {
+        lists.extend(order.values().map(|part| part.pointer("/Error/Errors")));
+    }
     for l in lists.into_iter().flatten() {
         if let Some(a) = l.as_array().filter(|a| !a.is_empty()) {
             let errs: Vec<ErrorEntity> =
@@ -1138,6 +1172,22 @@ fn truncate(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_error_inside_an_order_part_is_an_api_error() {
+        let reply = serde_json::json!({"Order": {"Errors": [], "OrderLines": [], "OrderTotal": 0.0,
+            "PaymentMethod": {"Method": 0, "Error": {"ErrorType": "Payment", "Errors": [{
+                "Code": "Invalid", "PropertyName": "CreditCardLastFourDigits",
+                "Message": "Provide accurate value for the credit card last four digits."}]}}}});
+        let e = check_errors(&reply).unwrap_err();
+        assert!(
+            matches!(&e, Error::Api(errs) if errs[0].property_name.as_deref() == Some("CreditCardLastFourDigits")),
+            "{e:?}"
+        );
+        let clean = serde_json::json!({"Order": {"Errors": [],
+            "PaymentMethod": {"Method": 30, "Name": "Mastercard"}}});
+        assert!(check_errors(&clean).is_ok());
+    }
 
     fn limiter(per_minute: u32) -> Limiter {
         Limiter {

@@ -4,14 +4,15 @@
 # form the model cannot answer. Nothing is bought: the order gets a DEMO- number.
 #
 # Render from the repository root:  vhs demo/story.tape
-# then cut the two README clips:    demo/cut.sh
+# then cut the two README clips:    demo/trim.py (see demo/README.md)
 #
 # Claude Code runs in an empty folder (~/.cache/mouser-mcp-demo/bench, made by demo/setup.sh).
 # The first time, Claude Code asks whether to trust it: run `claude` there once and accept.
 #
 # The waits are fixed: the model's answers take a different time on every run. If a scene is
 # cut short, raise its Sleep. The form keys are Claude Code 2.1's (checked by hand): right
-# expands the list, down walks it and moves on to the checkbox, space ticks, down to Accept,
+# expands the list, down walks it and moves on to "Decision", right expands it, down to
+# "Place this order" (once: another down leaves the list), space chooses it, down to Accept,
 # enter submits.
 
 Output demo/story.mp4
@@ -56,7 +57,7 @@ Enter
 Sleep 20s
 
 # Scene 4: the order, confirmed by the person in the form
-Type "Order it with UPS Express Saver and PayPal."
+Type "Order it with UPS Express Saver and the Mastercard."
 Sleep 600ms
 Enter
 Sleep 45s
@@ -72,6 +73,10 @@ Down
 Sleep 600ms
 Down
 Sleep 600ms
+Down
+Sleep 1s
+Right
+Sleep 1.5s
 Down
 Sleep 1s
 Space

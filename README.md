@@ -8,6 +8,14 @@
 agent finds the parts and prepares the order; the person places it in a confirmation form
 that the model does not see.**
 
+> [!WARNING]
+> **An order placed through Mouser's Order API can go unpaid, silently.** Mouser accepts the
+> order, confirms it, ships it and invoices it, but the payment method on the order (PayPal
+> or a saved card) is never charged. The API reply shows no error. Weeks later the invoice
+> comes back as unpaid, with payment reminders. Ordering through the API may need setup on
+> Mouser's side for your Order API key: contact Mouser before your first order here, and check
+> that its invoice was paid.
+
 ![Claude Code finds in-stock alternatives for a backordered RF BOM at Mouser](demo/search.gif)
 
 A Rust SDK (`mouser`) and an [MCP](https://modelcontextprotocol.io) server (`mouser-mcp`) for
@@ -32,11 +40,11 @@ From a session with the live Mouser API on 2026-11-06, for a two-delay-line test
    in-stock filter, checked each candidate's frequency range against 2–3 GHz and proposed
    ZX10R-2-183-S+ (resistive, DC–18 GHz, 2 in stock, €161.10), Fairview FMAT7467-6 pads
    (DC–12 GHz), Cinch 415-0033 cables in 1 m and 2 m, and Fairview ST0645 terminations:
-   €493.78 without the jumpers, all in stock. It flagged that the splitter's stock equalled
+   just under €500 without the jumpers, all in stock. It flagged that the splitter's stock equalled
    the quantity needed, and that the listings did not state two of the specs.
 3. `add_cart_items` put the parts in a cart. Mouser's own insert endpoint was seen dropping
    lines already in a cart; the tool writes the whole cart and reads it back instead.
-4. `query_order_options`, `preview_order` (€533.78 with €40.00 UPS, no VAT under reverse
+4. `query_order_options`, `preview_order` (the total with UPS shipping, no VAT under reverse
    charge on a company VAT number), `submit_order`. Claude Code showed the confirmation form,
    and the order was placed after the person accepted it with every line selected.
 
@@ -61,11 +69,13 @@ own gate, and every order needs the person's confirmation:
    ([elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation)).
    - The form has a one-line summary (total, shipping, tax, payment, ship-to), "Order
      lines", every line with quantity, part, unit price and line total, all selected, and
-     "Place this order", unticked. Clients step through the list with the keyboard.
-   - Only an accepted form with every line still selected and the box ticked places the
-     order, and only if Mouser's final preview still has the lines confirmed. Deselecting a
-     line, declining, cancelling or not answering places nothing. A client that cannot show
-     forms cannot order.
+     "Decision", a required choice with no default between "Don't order" and "Place this
+     order: 635.20 EUR, paid by Mastercard". Clients step through the list with the
+     keyboard, and do not accept the form until a decision is chosen.
+   - Only an accepted form with every line still selected and "Place this order" chosen
+     places the order, and only if Mouser's final preview still has the lines confirmed.
+     Deselecting a line, declining, cancelling or not answering places nothing. A client
+     that cannot show forms cannot order.
    - A confirmation is single use, expires after ten minutes and is bound to the exact
      arguments of the call, so an answer cannot be replayed onto another order. On protocol
      `2026-07-28` the form travels as an `InputRequiredResult` (multi round-trip) and the
@@ -85,7 +95,7 @@ person, and the model cannot answer it:
 
 ```text
 MCP server "mouser" requests your input
-Real order at Mouser: 635.20 EUR · 5 lines · merchandise 493.78 · UPS Worldwide Express Saver 40.00 · tax 101.42 · PayPal · to Ada Lovelace Berlin DE
+Real order at Mouser: 635.20 EUR · 5 lines · merchandise 493.78 · UPS Worldwide Express Saver 40.00 · tax 101.42 · Mastercard ending in 0000- Exp  12/30 · to Ada Lovelace Berlin DE
 ❯ ✔ Order lines: ▾
       ❯ ☒ "2 × ZX10R-2-183-S+  161.10 each  = 322.20 EUR"
         ☒ "2 × FMAT7467-6  53.10 each  = 106.20 EUR"
@@ -93,14 +103,19 @@ Real order at Mouser: 635.20 EUR · 5 lines · merchandise 493.78 · UPS Worldwi
         ☒ "1 × 415-0033-M1.0  17.44 each  = 17.44 EUR"
         ☒ "1 × 415-0033-M2.0  22.68 each  = 22.68 EUR"
       Everything in this order. Deselect any line to stop the order.
-  ✔ Place this order: 635.20 EUR: ☐
-      A real purchase, charged to the payment method above
+  Decision: (required)
+      ○ Don't order
+      ○ Place this order: 635.20 EUR, paid by Mastercard ending in 0000- Exp  12/30
+      A real purchase. Choose one
   Accept    Decline
 Esc to cancel · ↑/↓ to navigate · Backspace to unset · Space to toggle
 ```
 
-An order takes four steps: `query_order_options` (shipping and payment codes),
-`preview_order` (`cart_key`, `currency_code`, `shipping_code`, `payment_method`),
+Read the warning at the top first: an order can be accepted and never paid. An order takes
+four steps: `query_order_options` (shipping and payment codes; a saved card or invoice
+terms, not PayPal),
+`preview_order` (`cart_key`, `currency_code`, `shipping_code`, `payment_method`, and
+`card_last_four` for a saved card),
 `submit_order` (the same, plus the preview's `total`), and the user's answer in the form.
 A re-order of an earlier order takes the same arguments plus its `order_number`
 (`preview_order_from_order`, `submit_order_from_order`). Neither takes an address or freight
@@ -162,8 +177,19 @@ chmod 600 ~/.config/mouser/*-api-key
   example); `price_bom` reports them per currency.
 - **Ordering uses the account's defaults.** Shipping address, payment methods (PayPal, card,
   invoice terms) and VAT details come from your Mouser account; `query_order_options` lists
-  what it offers. With a validated EU VAT number the preview can show no tax (reverse
-  charge). Mouser fills in the order type (for example `Rush`: ship what is in stock first).
+  what it offers.
+- **An accepted order is not a paid order.** Mouser can accept, ship and invoice an order
+  placed here without charging its payment method, and say nothing about it in the reply.
+  Ordering may need setup on Mouser's side for your Order API key; contact Mouser before the
+  first order, and check its invoice. A saved card can also be declined outright.
+- **PayPal cannot be ordered through the API.** Mouser's Order API accepts PayPal as the
+  payment method but never sends you to PayPal to approve the payment, so Mouser places the
+  order, ships it and invoices it unpaid. `submit_order` refuses PayPal, and a preview that
+  names no payment method. Use a saved credit card (or invoice terms) to order here, or
+  order on mouser.com to pay with PayPal. `preview_order` still works with PayPal, for
+  prices, shipping and tax. With a validated EU VAT number the preview can show no tax
+  (reverse charge). Mouser fills in the order type (for example `Rush`: ship what is in
+  stock first).
 - **`MOUSER_MAX_ORDER_TOTAL` needs its currency.** `"500 EUR"`, not `500`: a bare number
   stops the server from starting. Orders are placed only in the ceiling's
   currency; to order in another, change the ceiling.

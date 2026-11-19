@@ -1,3 +1,7 @@
+# commit-msg too: the private-data check also reads commit messages (AGENTS.md).
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -37,6 +41,14 @@ repos:
 
   - repo: local
     hooks:
+      - id: private-data
+        name: no private data (emails, ~/.config/mouser-mcp/private-terms)
+        entry: tools/check_private_data.sh
+        language: script
+        stages: [pre-commit, commit-msg]
+        # the copyright line names the author on purpose; the lockfile is generated
+        exclude: ^(LICENSE|Cargo\.lock)$
+
       - id: cargo-fmt
         name: cargo fmt
         entry: cargo fmt --all -- --check

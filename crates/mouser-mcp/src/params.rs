@@ -266,8 +266,36 @@ pub struct OrderChoice {
     pub currency_code: String,
     #[schemars(description = "Shipping method Code from query_order_options (PrimaryShipping)")]
     pub shipping_code: Option<i64>,
-    #[schemars(description = "Payment Method from query_order_options, e.g. 1081 for PayPal")]
+    #[schemars(
+        description = "Payment Method from query_order_options: a saved card or invoice terms. PayPal (1081) previews but cannot be submitted: the API never asks PayPal for the money"
+    )]
     pub payment_method: Option<i64>,
+    #[schemars(
+        description = "CreditCardLastFourDigits of the saved card, as query_order_options lists it next to its Method. Required when payment_method is a card"
+    )]
+    pub card_last_four: Option<String>,
+    #[schemars(
+        description = "OrderType when a line is back-ordered: \"Rush\" ships what is in stock first and the rest when it arrives, \"Complete\" ships everything together. Mouser refuses a cart with a back-ordered line without one (\"You must select a backorder option\")"
+    )]
+    pub order_type: Option<OrderTypeChoice>,
+}
+
+/// How Mouser ships an order with back-ordered lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+pub enum OrderTypeChoice {
+    /// Ship what is in stock first, the rest when it arrives.
+    Rush,
+    /// Ship everything together.
+    Complete,
+}
+
+impl OrderTypeChoice {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rush => "Rush",
+            Self::Complete => "Complete",
+        }
+    }
 }
 
 impl OrderChoice {
@@ -281,8 +309,10 @@ impl OrderChoice {
             }),
             payment: self.payment_method.map(|m| PaymentTypeRequest {
                 method: m,
+                credit_card_last_four_digits: self.card_last_four.clone(),
                 ..Default::default()
             }),
+            order_type: self.order_type.map(|t| t.as_str().to_string()),
             ..Default::default()
         }
     }
@@ -335,4 +365,22 @@ pub struct CartFromOrderParams {
     pub country_code: Option<String>,
     #[schemars(description = "currencyCode")]
     pub currency_code: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_saved_card_travels_with_its_last_four_digits() {
+        let c: OrderChoice = serde_json::from_value(json!({"cart_key": "cart-1",
+            "currency_code": "EUR", "shipping_code": 65, "payment_method": 30,
+            "card_last_four": "1234"}))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(c.request()).unwrap()["Payment"],
+            json!({"Method": 30, "CreditCardLastFourDigits": "1234"})
+        );
+    }
 }
