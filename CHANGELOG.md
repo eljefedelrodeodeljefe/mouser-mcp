@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.7.0](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.6.0...v0.7.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* the form's place_order field is a string ("place" or "dont_order"), not a boolean. A client that answers true no longer confirms an order.
+* submit_order and submit_order_from_order refuse PayPal, and refuse a preview without a payment method. Order with a saved card or invoice terms from query_order_options, or on mouser.com to pay with PayPal.
+
+### Features
+
+* order with a saved card: card_last_four ([128f264](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/128f26494dd0b9afa8968ad48df4c38182bd97bb))
+* refuse private data in commits and commit messages ([0e81e4a](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/0e81e4a5d6f5a9dc37a9af5acb4e3d5f5b1b7c09))
+* the order form asks for a decision instead of a checkbox ([c836896](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/c836896207f51bfbae8bcd8b30fe606268f38ef8))
+
+
+### Bug Fixes
+
+* order_type for carts with a back-ordered line (Mouser refuses them without one) ([321e63a](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/321e63af9bc136927494b59a7420c9f1cc2c3b76))
+* refuse payments the Order API cannot collect ([b92bff7](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/b92bff76055405ea6e5c0c75cd26ebefcadaa3c5))
+
+
+### Documentation
+
+* **demo:** one recording that follows the session, cut into two clips ([42b4b4f](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/42b4b4f816c22ad075267bd6c8517f9ecd22f08d))
+* **demo:** record the session again with the card and the Decision choice ([d5d9c55](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/d5d9c55a14b06e556af96126b40d3d0f779ba89e))
+* **demo:** the stand-in Mouser API answers like the session it replays ([0f74227](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/0f74227f5ef0006f97007ca4f7123910ae1c0c02))
+* **demo:** the stand-in searches the way Mouser does ([d1a8964](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/d1a89643c31f3fd92d94b81bfe8f9be8b8f18197))
+* lead the README with a real session; one demo recording that follows it ([58e65d1](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/58e65d1ab675f66f4c42dfc0265b6e3947363ba6))
+* lead the README with what the server did in a real session ([7aff17b](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/7aff17b52a5128e83f6157e5b3eb26de895e70b4))
+* warn that an order placed through the API can go unpaid silently ([7bd54e4](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/7bd54e4fa6a4ce03bdb649dc452a0729b3b52fd7))
+
 ## [0.6.0](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.5.0...v0.6.0) (2026-11-06)
 
 
