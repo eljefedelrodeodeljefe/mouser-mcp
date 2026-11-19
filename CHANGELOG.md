@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.7.0...v0.7.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* refuse a CustomerPartNumber Mouser would drop, and name why a line is missing ([8c68452](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/8c684528169478a151455b4f8593cc869f6dc6de))
+* refuse a CustomerPartNumber Mouser would drop, and name why a line is missing ([2ced009](https://github.com/eljefedelrodeodeljefe/mouser-mcp/commit/2ced0093de900ba5b3fc947fdadd6c4d656808f4))
+
 ## [0.7.0](https://github.com/eljefedelrodeodeljefe/mouser-mcp/compare/v0.6.0...v0.7.0) (2026-11-19)
 
 
