@@ -274,6 +274,28 @@ pub struct OrderChoice {
         description = "CreditCardLastFourDigits of the saved card, as query_order_options lists it next to its Method. Required when payment_method is a card"
     )]
     pub card_last_four: Option<String>,
+    #[schemars(
+        description = "OrderType when a line is back-ordered: \"Rush\" ships what is in stock first and the rest when it arrives, \"Complete\" ships everything together. Mouser refuses a cart with a back-ordered line without one (\"You must select a backorder option\")"
+    )]
+    pub order_type: Option<OrderTypeChoice>,
+}
+
+/// How Mouser ships an order with back-ordered lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+pub enum OrderTypeChoice {
+    /// Ship what is in stock first, the rest when it arrives.
+    Rush,
+    /// Ship everything together.
+    Complete,
+}
+
+impl OrderTypeChoice {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rush => "Rush",
+            Self::Complete => "Complete",
+        }
+    }
 }
 
 impl OrderChoice {
@@ -290,6 +312,7 @@ impl OrderChoice {
                 credit_card_last_four_digits: self.card_last_four.clone(),
                 ..Default::default()
             }),
+            order_type: self.order_type.map(|t| t.as_str().to_string()),
             ..Default::default()
         }
     }
