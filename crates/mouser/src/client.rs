@@ -288,6 +288,24 @@ fn check_records(records: Option<i64>) -> Result<()> {
     }
 }
 
+/// Longest `CustomerPartNumber` Mouser keeps. A longer one does not fail the call: Mouser
+/// answers 200 with an empty top-level `Errors`, puts a `MaxLength` error on the line and
+/// leaves the part out of the cart.
+pub const CUSTOMER_PART_NUMBER_MAX: usize = 21;
+
+fn check_customer_part_number(part: &str, v: Option<&str>) -> Result<()> {
+    match v {
+        Some(v) if v.chars().count() > CUSTOMER_PART_NUMBER_MAX => {
+            let n = v.chars().count();
+            Err(Error::InvalidArgument(format!(
+                "{part}: CustomerPartNumber {v:?} is {n} characters, \
+                Mouser keeps at most {CUSTOMER_PART_NUMBER_MAX}"
+            )))
+        }
+        _ => Ok(()),
+    }
+}
+
 fn require(s: &str, what: &str) -> Result<()> {
     if s.trim().is_empty() {
         Err(Error::InvalidArgument(format!("{what} is required")))
@@ -646,6 +664,7 @@ impl Client {
                     i.mouser_part_number
                 )));
             }
+            check_customer_part_number(&i.mouser_part_number, i.customer_part_number.as_deref())?;
         }
         let mut q = vec![];
         opt(&mut q, "countryCode", country);
