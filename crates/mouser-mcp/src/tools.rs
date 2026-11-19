@@ -386,29 +386,56 @@ pub async fn add_cart_items(c: &Client, p: &CartItemsParams) -> Result<Value> {
     };
     let before = c.get_cart(key, country, currency).await?;
     let merged = merge_cart(&before, &p.items);
-    c.update_cart(
-        &CartItemRequestRoot {
-            cart_key: Some(key.into()),
-            mouser_pays_customs_and_duties: p.mouser_pays_customs_and_duties,
-            cart_items: Some(merged.clone()),
-        },
-        country,
-        currency,
-    )
-    .await
-    .map_err(|e| match e {
-        // sent, and no answer: the cart may hold the new quantities
-        mouser::Error::Transport(_) => {
-            CartUnverified(format!("the write got no answer ({e})")).into()
-        }
-        e => anyhow::Error::from(e),
-    })?;
+    let written = c
+        .update_cart(
+            &CartItemRequestRoot {
+                cart_key: Some(key.into()),
+                mouser_pays_customs_and_duties: p.mouser_pays_customs_and_duties,
+                cart_items: Some(merged.clone()),
+            },
+            country,
+            currency,
+        )
+        .await
+        .map_err(|e| match e {
+            // sent, and no answer: the cart may hold the new quantities
+            mouser::Error::Transport(_) => {
+                CartUnverified(format!("the write got no answer ({e})")).into()
+            }
+            e => anyhow::Error::from(e),
+        })?;
     let after = c
         .get_cart(key, country, currency)
         .await
         .map_err(|e| CartUnverified(format!("reading it back failed ({e})")))?;
-    check_cart(&after, &merged).map_err(|e| CartUnverified(e.to_string()))?;
+    check_cart(&after, &merged).map_err(|e| match line_errors(&written) {
+        Some(why) => CartUnverified(format!("{e}; Mouser refused lines: {why}")),
+        None => CartUnverified(e.to_string()),
+    })?;
     to_value(after)
+}
+
+/// The errors Mouser put on single lines of a cart reply (it leaves such a line out of the
+/// cart while the top-level `Errors` stays empty), as "part: code (property): message".
+fn line_errors(cart: &CartResponseRoot) -> Option<String> {
+    let all: Vec<String> = cart
+        .cart_items
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .flat_map(|l| {
+            let part = l.mouser_part_number.as_deref().unwrap_or("?");
+            l.errors.as_deref().unwrap_or(&[]).iter().map(move |e| {
+                let code = e.code.as_deref().unwrap_or("?");
+                let msg = e.message.as_deref().unwrap_or("");
+                match e.property_name.as_deref().filter(|p| !p.is_empty()) {
+                    Some(p) => format!("{part}: {code} ({p}): {msg}"),
+                    None => format!("{part}: {code}: {msg}"),
+                }
+            })
+        })
+        .collect();
+    (!all.is_empty()).then(|| all.join("; "))
 }
 
 /// `add_cart_items` wrote the cart and could not confirm that it holds what was written. Not
@@ -857,6 +884,73 @@ mod tests {
             mcp.message.contains("was written") && mcp.message.contains("get_cart"),
             "{mcp:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_line_mouser_refused_names_its_reason() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        let splitter = json!({"MouserPartNumber": "139-ZX10R-2-183-S+", "Quantity": 2});
+        mount_carts(&server, cart(json!([splitter])), cart(json!([splitter]))).await;
+        // Mouser's reply to a line it would not take: HTTP 200, top-level Errors empty, the
+        // reason on the line, and the line left out of the cart
+        Mock::given(method("POST"))
+            .and(path("/api/v1/cart"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(cart(json!([
+                {"MouserPartNumber": "67-ST0645", "Quantity": 2, "UnitPrice": 0.0,
+                    "Errors": [{"Id": 0, "Code": "Invalid", "Message": "invented reason",
+                        "PropertyName": "Quantity"}]}]))))
+            .mount(&server)
+            .await;
+        let e = add_cart_items(&order_client(&server), &add(vec![("67-ST0645", 2, None)]))
+            .await
+            .unwrap_err();
+        assert!(
+            e.to_string().contains("67-ST0645 is missing")
+                && e.to_string()
+                    .contains("67-ST0645: Invalid (Quantity): invented reason"),
+            "{e}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_customer_part_number_mouser_would_drop_is_refused_before_the_write() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        mount_carts(&server, cart(json!([])), cart(json!([]))).await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/cart"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let long = "a".repeat(mouser::CUSTOMER_PART_NUMBER_MAX + 1);
+        let e = add_cart_items(
+            &order_client(&server),
+            &add(vec![("67-ST0645", 2, Some(long.as_str()))]),
+        )
+        .await
+        .unwrap_err();
+        assert!(e.to_string().contains("at most 21"), "{e}");
+        // nothing was written: this one is the caller's to fix
+        let mcp = crate::error::tool_error(e);
+        assert_eq!(mcp.code, rmcp::model::ErrorCode::INVALID_PARAMS, "{mcp:?}");
+        // the limit is in characters, not bytes
+        let fits = "ä".repeat(mouser::CUSTOMER_PART_NUMBER_MAX);
+        Mock::given(method("POST"))
+            .and(path("/api/v1/cart"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(cart(json!([]))))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        let r = update_cart(
+            &order_client(&server),
+            &add(vec![("67-ST0645", 2, Some(fits.as_str()))]),
+        )
+        .await;
+        assert!(r.is_ok(), "{r:?}");
     }
 
     #[tokio::test]

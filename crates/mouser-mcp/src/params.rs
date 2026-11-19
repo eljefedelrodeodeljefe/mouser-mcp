@@ -135,7 +135,9 @@ pub struct CartItem {
     pub mouser_part_number: String,
     #[schemars(description = "Quantity; a multiple of the part's Mult and at least its Min")]
     pub quantity: i64,
-    #[schemars(description = "Your part number for this line (CustomerPartNumber)")]
+    #[schemars(
+        description = "Your part number for this line (CustomerPartNumber), at most 21 characters"
+    )]
     pub customer_part_number: Option<String>,
     #[schemars(description = "PackagingChoice, for parts offered on reels or cut tape")]
     pub packaging_choice: Option<String>,

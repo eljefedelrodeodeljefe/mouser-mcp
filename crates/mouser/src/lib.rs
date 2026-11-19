@@ -17,7 +17,7 @@ mod lenient;
 pub mod models;
 
 pub use client::{
-    ApiKey, Client, Config, DEFAULT_BASE_URL, DateFilter, ExpectedOrder, OrderCeiling,
-    PartSearchOption, SearchOption, join_part_numbers, mouser_date,
+    ApiKey, CUSTOMER_PART_NUMBER_MAX, Client, Config, DEFAULT_BASE_URL, DateFilter, ExpectedOrder,
+    OrderCeiling, PartSearchOption, SearchOption, join_part_numbers, mouser_date,
 };
 pub use error::{Error, KeyKind, Result};
